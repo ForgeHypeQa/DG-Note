@@ -14,7 +14,7 @@ const USERS = [
   {
     id: 'admin', name: 'ForgeHype Admin', short: 'FH', role: 'admin', enabled: true,
     // ForgeHype email (hashed). Override with ADMIN_LOGIN_HASH / ADMIN_PASSWORD_HASH in the host's settings.
-    loginHash: process.env.ADMIN_LOGIN_HASH || '217d52c8c885571b327ee465a9c536c1:0a649e1b2f77054b9f00c04b6485988d8aa45a965e592d5dca880391b968aa9a',
+    loginHash: process.env.ADMIN_LOGIN_HASH || '2c86b48f3de0c2f4969d7bef7e45d5c2:ee6d67f64817485324331f312cb2abaa392a7eb8905741f52284b602f02f0239',
     pwHash: process.env.ADMIN_PASSWORD_HASH || '502a426f8da7d8825e7d952c58a88f7e:f54c109006cf7c2af128a7aaeec6aa7919d0ce24c3db024f8cc3bd2d81a37254',
   },
   ...[1, 2, 3, 4, 5, 6].map(n => ({ id: `guest${n}`, name: `Guest ${n}`, short: `G${n}`, role: 'guest', enabled: true, pwHash: GUEST_PW })),
