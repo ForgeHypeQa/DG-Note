@@ -1,0 +1,19 @@
+{
+  "name": "dg-note",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DG-Note by ForgeHype: meeting recorder that names speakers and transcribes Arabic and English with Soniox.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "mock": "node test/mock-soniox.js",
+    "dev:mock": "SONIOX_API_KEY=mock SONIOX_API_BASE=http://localhost:4010/v1 node server/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2"
+  }
+}
