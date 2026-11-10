@@ -37,7 +37,23 @@ function tokens() {
   return out;
 }
 
-app.use((req, res, next) => (req.headers.authorization?.startsWith('Bearer ') ? next() : res.status(401).json({ message: 'Missing API key' })));
+app.use((req, res, next) => (req.headers.authorization?.startsWith('Bearer ') || req.headers['x-api-key'] ? next() : res.status(401).json({ message: 'Missing API key' })));
+
+// Stand-in for the report writer (Anthropic Messages API shape). Returns fixed minutes using the attendee names it was sent.
+app.post('/v1/messages', express.json({ limit: '5mb' }), (req, res) => {
+  const text = req.body.messages?.[0]?.content || '';
+  const names = [...text.matchAll(/^- ([^(\n]+?)(?: \(|$)/gm)].map(m => m[1].trim());
+  const n = i => names[i] || '';
+  console.log('[mock] report for', names.join(', '));
+  res.json({ content: [{ type: 'text', text: JSON.stringify({
+    title: 'Falls and Medication Review',
+    summary: ['Mr. Khalid in room 12 fell twice this week, both at night.', 'A walker and twice-weekly physiotherapy will start.', 'Night checks move to every two hours from tonight.'],
+    topics: [{ topic: 'Falls in room 12', notes: 'Two night-time falls this week; gait is unsteady.' }, { topic: 'Medication', notes: 'Amlodipine 10 mg may cause dizziness on standing.' }],
+    decisions: ['Start a walker and physiotherapy twice a week.', 'Night checks every two hours from tonight.'],
+    actions: [{ owner: n(1), task: 'Walker assessment', due: 'Tomorrow' }, { owner: n(3), task: 'Book the family meeting', due: 'Thursday' }, { owner: '', task: 'Update the medication chart', due: '' }],
+    questions: [{ by: n(2), question: 'Could the dose be reduced further?' }],
+  }) }] });
+});
 
 app.post('/v1/files', express.raw({ type: () => true, limit: '500mb' }), (req, res) => {
   const id = randomUUID(); files.set(id, req.body.length);

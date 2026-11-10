@@ -11,6 +11,7 @@ import { buildResult } from './build.js';
 import { ROSTER, DEPARTMENTS, DOMAIN_TERMS } from './roster.js';
 import * as auth from './auth.js';
 import { splitParts, joinParts } from './audio.js';
+import * as minutes from './minutes.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -24,7 +25,7 @@ app.set('trust proxy', 1); // Render runs behind a proxy: needed for secure cook
 app.use(express.static(publicDir));
 auth.mount(app, express);
 
-app.get('/api/health', (req, res) => res.json({ ok: true, engine: engine.configured() }));
+app.get('/api/health', (req, res) => res.json({ ok: true, engine: engine.configured(), reports: minutes.configured() }));
 app.get('/api/roster', auth.requireUser, (req, res) => res.json({ people: ROSTER, departments: Object.keys(DEPARTMENTS) }));
 
 // Body = the raw audio file (or several parts back to back, with header
@@ -109,6 +110,21 @@ async function run(job, parts, mime, ext) {
     setTimeout(() => jobs.delete(job.id), KEEP_MS).unref();
   }
 }
+
+// Meeting minutes from a checked transcript. Body: { title, date, languages, people[], segments[{who,t,text}] }.
+// Nothing is stored: the transcript is sent, the minutes come back.
+app.post('/api/report', auth.requireUser, express.json({ limit: '3mb' }), async (req, res) => {
+  if (!minutes.configured()) return res.status(503).json({ error: 'Meeting reports are not switched on for this server yet. Ask the admin.' });
+  const m = req.body || {};
+  if (!Array.isArray(m.segments) || !m.segments.length) return res.status(400).json({ error: 'There is no transcript to write a report from.' });
+  try { res.json(await minutes.writeMinutes(m)); }
+  catch (e) {
+    console.error('[report]', e.message);
+    res.status(502).json({ error: e.status === 401 || e.status === 403 ? 'Meeting reports are not set up correctly on the server. Ask the admin.'
+      : e.status === 429 || e.status === 529 ? 'The report writer is busy. Try again in a minute.'
+      : 'The report could not be written. Try again.' });
+  }
+});
 
 // What the user sees when something goes wrong: no engine names, no technical detail.
 function friendly(e) {

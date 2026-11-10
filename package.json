@@ -11,7 +11,7 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "mock": "node test/mock-soniox.js",
-    "dev:mock": "SONIOX_API_KEY=mock SONIOX_API_BASE=http://localhost:4010/v1 node server/index.js",
+    "dev:mock": "SONIOX_API_KEY=mock SONIOX_API_BASE=http://localhost:4010/v1 ANTHROPIC_API_KEY=mock ANTHROPIC_API_BASE=http://localhost:4010 node server/index.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {

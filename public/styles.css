@@ -357,3 +357,7 @@ button.sp{cursor:pointer}
 .same span{font-size:12px;font-weight:650;color:rgba(2,1,2,.66);width:100%}
 .same button{background:rgba(2,1,2,.1);border-radius:999px;padding:7px 12px;font-size:13px;font-weight:700}
 .unjoin{background:rgba(2,1,2,.1);border-radius:999px;padding:4px 10px;font-size:12px;font-weight:700;margin-left:4px}
+
+/* meeting report */
+.writing{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:16px;color:#E5E2E1;background:rgba(255,255,255,.07);border-radius:18px;padding:14px 16px}
+.addmail{display:inline-block;margin-top:6px;font-size:12.5px;font-weight:700;color:var(--accink);background:var(--accsoft);border-radius:999px;padding:4px 10px}

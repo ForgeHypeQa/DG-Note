@@ -106,7 +106,7 @@ const AR_ORG = /(?:^|\s)((?:وزارة|مستشفى|مستشفي|مؤسسة|شر
 const AR_NOT = '(?!(?:في|من|مع|و|قسم)(?:\\s|$))(?!(?:وزارة|مستشفى|مؤسسة|شركة|مركز|جامعة|مجلس|هيئة|بنك))';
 const AR_ROLE = new RegExp(`(?:^|\\s)((?:ال)?(?:مدير|رئيس|نائب|منسق|مشرف|أخصائي|اخصائي|ممرض|طبيب|استشاري|صيدلي|صيدلاني|محامي|مستشار|مهندس|موظف|سكرتير|محاسب|باحث)[ةه]?(?:\\s+${AR_NOT}[^\\s،,.]+){0,2})`);
 const AR_DEPT = new RegExp(`(?:^|\\s)قسم\\s+([^\\s،,.]+(?:\\s+${AR_NOT}[^\\s،,.]+)?)`);
-const NOT_NAME = new Set(['great','thanks','thank','perfect','awesome','excellent','exactly','absolutely','definitely','true','correct','agreed','fantastic','wonderful','nice','cool','amazing','interesting','oh','um','uh','hmm','yep','nope','wow','sorry','late','not','going','gonna','fine','happy','glad','afraid','agree','done','ready','back','still','very','really','just','sure','here','new','looking','trying','calling','joining','speaking','talking','wondering','thinking','worried','concerned','responsible','in','on','at','with','from','a','an','to','for','one','also','actually','currently','basically','let','lets','let\'s','we','so','okay','ok','yes','no','the','this','that','today','first','next','good','thank','thanks','please','can','could','should','will','what','how','when','our','us','he','she','they','it','there','now','right','alright','well','then','also','and','but','because','if','as','about','regarding','agenda','meeting','item','moving','start','starting','welcome','hi','hello','yeah','sure']);
+const NOT_NAME = new Set(['like','village','city','place','home','great','thanks','thank','perfect','awesome','excellent','exactly','absolutely','definitely','true','correct','agreed','fantastic','wonderful','nice','cool','amazing','interesting','oh','um','uh','hmm','yep','nope','wow','sorry','late','not','going','gonna','fine','happy','glad','afraid','agree','done','ready','back','still','very','really','just','sure','here','new','looking','trying','calling','joining','speaking','talking','wondering','thinking','worried','concerned','responsible','in','on','at','with','from','a','an','to','for','one','also','actually','currently','basically','let','lets','let\'s','we','so','okay','ok','yes','no','the','this','that','today','first','next','good','thank','thanks','please','can','could','should','will','what','how','when','our','us','he','she','they','it','there','now','right','alright','well','then','also','and','but','because','if','as','about','regarding','agenda','meeting','item','moving','start','starting','welcome','hi','hello','yeah','sure']);
 const EN_STOP = new Set(['from','in','with','and','of','at','i','i\'m','im','working','work','works','the','a','an','department','dept','team','unit','here','speaking','representing','for','on','as','my','our','today','also','just','who','which','role','position','title','is','am','currently']);
 const AR_STOP = new Set(['من','في','مع','و','قسم','وأنا','وانا','أعمل','اعمل','بصفتي','كـ']);
 
@@ -147,7 +147,8 @@ function nameFrom(text) {
     // Without "I'm"/"my name is", only accept a name made of capitalised words (Al-/bin/bint allowed).
     if (!m && !ar && (NOT_NAME.has(lw) || (!/^[A-Z]/.test(w) && !/^(al|el|bin|bint|ibn|abu|van|de|da|del)$/i.test(w)))) break;
     out.push(latin && !ar && /^[a-z]/.test(w) && !/^(al|el|bin|bint|ibn|abu)$/i.test(w) ? cap(w) : w);
-    if (/[.,،;!?]$/.test(raw) || k === words.length - 1) { cleanEnd = true; break; }
+    if (/[?؟]$/.test(raw)) { if (!m) { out.length = 0; } break; }   // "Village?" is a question, not a name
+    if (/[.,،;!]$/.test(raw) || k === words.length - 1) { cleanEnd = true; break; }
     if (out.length === 4) break;
   }
   if (!out.length) return { name: '', dr: title === 'Dr.' };

@@ -131,3 +131,7 @@ test('five people who never introduce themselves are all kept', () => {
   const r = buildResult(tokens, { roster: ROSTER, departments: DEPARTMENTS });
   assert.deepEqual(r.speakers.map(s => 'Speaker ' + s.index), ['Speaker 1', 'Speaker 2', 'Speaker 3', 'Speaker 4', 'Speaker 5']);
 });
+test('a word with a question mark is not a name', () => {
+  assert.equal(P('Village? हाँ, वैसे जी, अभी my like, native place.').name, '');
+  assert.equal(P("Village? I'm like a Banjara kind of person.").name, '');
+});

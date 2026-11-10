@@ -11,6 +11,8 @@ services:
     envVars:
       - key: SONIOX_API_KEY
         sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
       - key: SESSION_SECRET
         generateValue: true
       - key: NODE_VERSION

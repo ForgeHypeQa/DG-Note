@@ -283,6 +283,8 @@ function cardHTML(i){
       <label>Name<input data-f="n" value="${esc(x.name)}" placeholder="Speaker ${x.index}" list="rosterNames" autocomplete="off" dir="auto"></label>
       <label>Title or role <i>optional</i><input data-f="r" value="${esc(x.role||'')}" placeholder="e.g. Head Nurse, Finance Manager" autocomplete="off" dir="auto"></label>
       <label>Department <i>optional</i><input data-f="d" value="${esc(x.dept||'')}" autocomplete="off" dir="auto"></label>
+      <label>Email <i>optional</i><input data-f="e" type="email" inputmode="email" value="${esc(x.email||'')}" placeholder="name@company.com" autocomplete="off" autocapitalize="none" spellcheck="false"></label>
+      <label>Phone <i>optional</i><input data-f="ph" type="tel" inputmode="tel" value="${esc(x.phone||'')}" placeholder="+974 …" autocomplete="off"></label>
       <label>Organisation <i>optional</i><input data-f="o" value="${esc(x.org||'')}" placeholder="e.g. Hamad Medical Corporation" autocomplete="off" dir="auto"></label>
       <button class="fsave" data-act="sp-save" data-i="${i}">Save</button>
       <p class="heard" style="font-size:12px">Spoke for about ${durTxt((x.talkMs||0)/1000)}. Same name on two cards joins them in the report.</p>
@@ -320,11 +322,11 @@ function viewSolo(){
      <button class="btn2" data-act="solo-save-audio">Save the audio file</button>
      <button class="btn2" data-act="solo-new">Back to Solo</button>`);
   if(s.phase==='review') return capsheet(
-    `<div class="eyebrow">Transcript ready</div><h1 class="mt">Who spoke</h1><p class="sub">Names come from the introductions. Tap a card to name someone, or to join two voices that are the same person.</p>${tableHTML()}`,
+    `<div class="eyebrow">Transcript ready</div><h1 class="mt">Who spoke</h1><p class="sub">Check who spoke, then create the report. Tap a card to name someone, add their email, or join two voices that are the same person.</p>${tableHTML()}`,
     `<div class="sech"><h2>Speakers</h2><span>${(n=>n+(n===1?' person':' people'))(s.speakers.filter(x=>!x.mergedInto).length)}</span></div>
      <div class="stack" id="sStack">${s.speakers.map((x,i)=>x.mergedInto?'':cardHTML(i)).join('')}</div>
      <datalist id="rosterNames">${ROSTER.map(p=>`<option value="${esc(p.name)}">`).join('')}</datalist>
-     <button class="cta" data-act="solo-open">Open the transcript</button>
+     <button class="cta" data-act="solo-open">Save names and create report</button>
      <button class="btn2" data-act="solo-save-audio">Save the audio file</button>
      <button class="btn2" data-act="solo-new">New Solo meeting</button>`);
   // intro + meet
@@ -358,7 +360,7 @@ function rootOf(x,speakers){let r=x,n=0;while(r.mergedInto&&n++<10){const t=spea
 function peopleFrom(speakers){
   const people=[],idx={},mapP={};
   speakers.forEach(x0=>{const x=rootOf(x0,speakers),n=spName(x).trim(),key=n.toLowerCase();
-    if(!(key in idx)){idx[key]=people.length;people.push({n,r:x.role||'',d:x.dept||'',o:x.org||'',e:x.email||rosterBy(n)?.email||'',c:x.c,labels:[]});}
+    if(!(key in idx)){idx[key]=people.length;people.push({n,r:x.role||'',d:x.dept||'',o:x.org||'',e:x.email||rosterBy(n)?.email||'',ph:x.phone||'',c:x.c,labels:[]});}
     people[idx[key]].labels.push(x0.label);mapP[x0.label]=idx[key];});
   return {people,mapP};
 }
@@ -368,12 +370,32 @@ function relabel(r){
   r.tx=r.tx.map((l,i)=>({...l,p:mapP[r.result.segments[i]?.speaker]??l.p}));
 }
 function saveSoloSpeakers(){const s=ST.solo,r=ST.reports.find(x=>x.id===s.rid);if(r){r.speakers=s.speakers.map(({open,...y})=>y);saveReport(r);}}
+// Writes the meeting report (minutes) from the checked transcript. Uses the names, corrections and edits.
+async function makeMinutes(r){
+  if(!r||!r.real||r.minutes==='working')return;
+  r.minutes='working';r.minutesErr='';if(curRep()===r)render();
+  try{
+    const body={title:r.title.startsWith('Solo meeting · ')?'':r.title,date:r.when+' '+r.time,languages:repLangs(r).map(langName),
+      people:r.people.map(p=>({name:p.n,role:p.r,dept:p.d,org:p.o})),
+      segments:r.tx.map((l,i)=>({t:l.t,who:r.people[l.p]?.n||'Unknown',text:(r.ed['t'+i]??plain(r,l.s))}))};
+    const m=await api('/api/report',body);
+    const idx=name=>{const n=String(name||'').trim().toLowerCase();if(!n)return -1;let k=r.people.findIndex(p=>p.n.toLowerCase()===n);
+      if(k<0)k=r.people.findIndex(p=>p.n.toLowerCase().split(/\s+/).includes(n.split(/\s+/)[0])&&!/^speaker \d+$/.test(n));return k;};
+    for(const k of Object.keys(r.ed))if(/^[sda]\d/.test(k))delete r.ed[k];
+    if(r.title.startsWith('Solo meeting · ')&&m.title)r.title=m.title;
+    Object.assign(r,{sum:m.summary,topics:m.topics,dec:m.decisions,act:m.actions.map(a=>({p:idx(a.owner),t:a.task,due:a.due})),qs:m.questions.map(q=>({p:idx(q.by),t:q.question})),minutes:'done',minutesAt:Date.now()});
+    ['r-top','r-dec','r-act'].forEach(k=>ST.open[k]=true);ST.open['r-tx']=false;
+    toast('Meeting report ready');
+  }catch(e){r.minutes='error';r.minutesErr=e.message;}
+  saveReport(r);if(curRep()===r)render();
+}
 function buildRealReport(){
   const s=ST.solo,res=s.result,{people,mapP}=peopleFrom(s.speakers);
   const dms=res.durationMs||(s.t||0)*1000, st=s.startedAt?new Date(s.startedAt):new Date(Date.now()-dms), en=new Date(st.getTime()+dms);
   const old=s.rid&&ST.reports.find(x=>x.id===s.rid);
   const parts=s.parts||(s.blob?[s.blob]:[]);
   const keep=old?{res:old.res,ed:old.ed,hist:old.hist,add:old.add,status:old.status,sentAt:old.sentAt}:blank();
+  if(old&&old.minutes==='done')Object.assign(keep,{minutes:'done',sum:old.sum,topics:old.topics,dec:old.dec,act:old.act,qs:old.qs});
   return {id:s.rid||('R'+Date.now()),owner:ME_USER?.id,mid:s.mid||null,stage:'done',createdAt:old?.createdAt||Date.now(),
     result:res,speakers:s.speakers.map(({open,...x})=>x),startedAt:s.startedAt||null,
     kind:'solo',real:true,title:s.title.trim()||('Solo meeting · '+hm(st)),when:st.toDateString()===new Date().toDateString()?'Today':st.toLocaleDateString([],{weekday:'short',day:'numeric',month:'short'}),
@@ -545,7 +567,8 @@ function repDetail(r){
   const E=(key,list)=>ed?`data-ek="${key}" data-list="${list}" contenteditable="true"`:'';
   const txt=(key,src,trTxt)=> (tr&&r.ed[key]==null&&trTxt!=null)?esc(trTxt):rt(r,key,src);
   const added=list=>r.add[list].map(a=>`<li>${a.done?`<span>${esc(a.fixed)}<span class="tagfix">Dictated</span></span>`:'<span class="rawd" id="dictLive"></span>'}</li>`).join('');
-  const n=unsure(r), who=p=>r.people[p]||{n:'Unknown',c:'#ccc',d:''};
+  const n=unsure(r), who=p=>r.people[p]||{n:'Unassigned',c:'#D5D2D0',d:''};
+  const mins=r.real?(r.minutes||'none'):'done';
   const cap=`<div class="bar"><button class="back" data-act="rep-back">${I('back')}Reports</button><span class="grow"></span>
       ${Object.keys(r.tr).length?`<button class="pillb" data-act="rep-lang">${I('globe','s')}${LANG[lang].name}</button>`:''}
       ${r.status==='draft'&&lang==='en'?`<button class="pillb ${ed?'on':''}" data-act="rep-edit">${ed?'Done':'Edit'}</button>`:''}</div>
@@ -553,14 +576,16 @@ function repDetail(r){
     <h1 class="mt">${esc(r.title)}</h1>
     <p class="meta">${r.when} · ${r.time} · ${r.dur}<br>Called by ${esc(r.by)}</p>
     <div class="sumh">${L.sum}</div>
-    ${r.real&&!r.sum.length&&!r.add.sum.length?`<p class="sub" style="max-width:none">Transcribed by ForgeHype Meet. The AI summary, decisions and actions are the next build step.</p>`:''}
+    ${mins==='working'?`<div class="writing"><span class="gdots"><i></i><i></i><i></i></span>Writing the meeting report…</div>`
+      :mins!=='done'?`<p class="sub" style="max-width:none">${mins==='error'?esc(r.minutesErr||'The report could not be written.'):'The transcript is ready. Create the meeting report: summary, decisions, action items and open questions.'}</p><button class="cta" style="margin-top:14px" data-act="rep-minutes">${mins==='error'?'Try again':'Create the meeting report'}</button>`:''}
     <ul class="sum ${rtl?'rtl':''} ${ST.rep.shim?'shim':''}" ${rtl?'lang="ar"':''}>${r.sum.map((s,i)=>`<li><span ${E('s'+i,'sum')}>${txt('s'+i,s,tr&&tr.sum[i])}</span></li>`).join('')}${added('sum')}</ul>
     <div class="sumh">Languages detected</div><p class="langs">${repLangs(r).map(langName).join(' · ')}</p>
-    <div class="rchips">${n&&lang==='en'?`<button class="rchip u1" data-act="u-first">${n} unclear word${n>1?'s':''} · tap the orange text</button>`:''}${r.hist.length?`<span class="rchip">${r.hist.length} change${r.hist.length>1?'s':''} · originals kept</span>`:''}</div>`;
+    <div class="rchips">${r.real&&mins==='done'&&r.status==='draft'?`<button class="rchip" data-act="rep-minutes">↻ Write the report again</button>`:''}${n&&lang==='en'?`<button class="rchip u1" data-act="u-first">${n} unclear word${n>1?'s':''} · tap the orange text</button>`:''}${r.hist.length?`<span class="rchip">${r.hist.length} change${r.hist.length>1?'s':''} · originals kept</span>`:''}</div>`;
+  const topics=(r.topics||[]).map(t=>`<div class="act"><b class="at" style="display:block;font-weight:700">${esc(t.topic)}</b>${t.notes?`<div style="margin-top:4px;font-size:15px;color:var(--fg2)">${esc(t.notes)}</div>`:''}</div>`).join('');
   const dec=`<ol class="nlist ${rtl?'rtl':''} ${ST.rep.shim?'shim':''}" ${rtl?'lang="ar"':''}>${r.dec.map((s,i)=>`<li><span ${E('d'+i,'dec')}>${txt('d'+i,s,tr&&tr.dec[i])}</span></li>`).join('')}${added('dec')}</ol>`;
-  const act=r.act.map((a,i)=>{const p=who(a.p),t=tr&&tr.act[i];return `<div class="act"><div class="at ${rtl?'rtl':''}" ${rtl?'dir="rtl" lang="ar"':''} ${E('a'+i,'act')}>${txt('a'+i,a.t,t&&t.t)}</div><div class="am"><span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span><span>${esc(t?t.due:a.due)}</span></div></div>`;}).join('');
+  const act=r.act.map((a,i)=>{const p=who(a.p),t=tr&&tr.act[i];return `<div class="act"><div class="at ${rtl?'rtl':''}" ${rtl?'dir="rtl" lang="ar"':''} ${E('a'+i,'act')}>${txt('a'+i,a.t,t&&t.t)}</div><div class="am"><span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span><span>${esc((t?t.due:a.due)||'No date')}</span></div></div>`;}).join('');
   const qs=r.qs.map((q,i)=>{const p=who(q.p),t=tr&&tr.qs[i];return `<div class="act"><div class="at" ${rtl&&t?'dir="rtl" lang="ar"':''}>${esc(t||q.t)}</div><div class="am"><span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span><span>Open</span></div></div>`;}).join('');
-  const ppl=`<p class="note" style="margin-bottom:8px">${r.real?'Named from the introductions. Anyone who didn’t introduce themselves is listed as Speaker 1, 2… Tap a person to change the name.':r.kind==='solo'?'Named from the voice introductions at the start.':'Named from each person’s login on their own phone.'} ${r.status==='sent'?'Emailed '+esc(r.sentAt)+'.':'The report is emailed to everyone listed.'}</p>`+r.people.map((p,k)=>`<${r.real?`button data-act="rep-person" data-p="${k}"`:'div'} class="prow ${r.real?'tap':''}"><span class="av lg" style="--c:${p.c}">${ini(p.n)}</span><div class="grow"><b dir="auto">${esc(p.n)}</b>${[p.r,p.d,p.o].filter(Boolean).length?`<small dir="auto">${esc([p.r,p.d,p.o].filter(Boolean).join(' · '))}</small>`:''}<small>${p.e?esc(p.e):/^Speaker \d+$/.test(p.n)?'Tap to add a name':'No email on file'}</small></div>${r.real?I('fwd','s'):''}</${r.real?'button':'div'}>`).join('');
+  const ppl=`<p class="note" style="margin-bottom:8px">${r.real?'Named from the introductions. Anyone who didn’t introduce themselves is listed as Speaker 1, 2… Tap a person to change the name.':r.kind==='solo'?'Named from the voice introductions at the start.':'Named from each person’s login on their own phone.'} ${r.status==='sent'?'Emailed '+esc(r.sentAt)+'.':'The report is emailed to everyone listed.'}</p>`+r.people.map((p,k)=>`<${r.real?`button data-act="rep-person" data-p="${k}"`:'div'} class="prow ${r.real?'tap':''}"><span class="av lg" style="--c:${p.c}">${ini(p.n)}</span><div class="grow"><b dir="auto">${esc(p.n)}</b>${[p.r,p.d,p.o].filter(Boolean).length?`<small dir="auto">${esc([p.r,p.d,p.o].filter(Boolean).join(' · '))}</small>`:''}${p.e||p.ph?`<small>${[p.e,p.ph].filter(Boolean).map(esc).join(' · ')}</small>`:''}${r.real&&!p.e?`<span class="addmail" data-act="rep-person" data-p="${k}" data-focus="email">+ Add email</span>`:(!r.real&&!p.e?'<small>No email on file</small>':'')}</div>${r.real?I('fwd','s'):''}</${r.real?'button':'div'}>`).join('');
   const tx=`<p class="note">${r.real?(onlyEnglish(r)?'':'Anything not said in English is shown in English, with the original underneath. '):'Clean transcript: grammar fixed and filler words removed. '}${lang!=='en'?'Shown in English with the original words underneath.':n?'Orange words were unclear in the audio. Tap one to check it.':'Tap a name to change who said it.'}</p>`+r.tx.map((l,i)=>{const p=who(l.p);return `<div class="txl"><div class="th">${r.real?`<button class="sp" style="--c:${p.c}" data-act="rep-person" data-p="${l.p}" aria-label="Rename ${esc(p.n)}">${esc(first(p.n))}</button>`:`<span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span>`}<span>${l.t}</span></div><div class="tt" ${E('t'+i,'tx')}>${rt(r,'t'+i,l.s)}</div>${l.o?`<div class="to" dir="auto"${/[\u0600-\u06FF]/.test(l.o)?' lang="ar"':''}>${esc(l.o)}</div>`:''}</div>`;}).join('');
   let seed=7;const rnd=()=>{seed=(seed*16807)%2147483647;return seed/2147483647;};
   const bars=r.tx.map(l=>Array.from({length:Math.max(4,Math.round(l.s.length/12))},()=>`<i style="--c:${who(l.p).c};height:${20+Math.round(rnd()*80)}%"></i>`).join('')+'<i style="--c:#D5D2D0;height:8%"></i>').join('');
@@ -572,11 +597,12 @@ function repDetail(r){
   return capsheet(cap,
     `${lang!=='en'?`<p class="note">Translated from English by AI. The English original is kept. <button data-act="rep-en" style="font-weight:700;color:var(--accink)">Show original</button></p>`:''}
      ${ed&&r.real?`<p class="note">Tap any transcript line to change it. Changes are saved in the change history.</p>`:ed?`<p class="note">Tap any text to change it, or use Dictate. Dictated words are cleaned up for grammar and spelling.</p>`:''}
-     ${r.dec.length+r.add.dec.length||!r.real?drawer('r-dec',L.dec,r.dec.length+r.add.dec.length,dec,true):''}
-     ${r.act.length||!r.real?drawer('r-act',L.act,r.act.length,act):''}
+     ${(r.topics||[]).length?drawer('r-top','Discussion',r.topics.length,topics,true):''}
+     ${r.dec.length+r.add.dec.length||!r.real?drawer('r-dec',L.dec,r.dec.length+r.add.dec.length,dec,true):mins==='done'?drawer('r-dec',L.dec,0,'<p class="fine" style="text-align:start">No decisions were made in this meeting.</p>'):''}
+     ${r.act.length||!r.real?drawer('r-act',L.act,r.act.length,act,!!r.real):mins==='done'?drawer('r-act',L.act,0,'<p class="fine" style="text-align:start">No action items came up.</p>'):''}
      ${r.qs.length?drawer('r-qs',L.qs,r.qs.length,qs):''}
      ${drawer('r-ppl',L.ppl,r.people.length,ppl)}
-     ${drawer('r-tx',L.tx,r.tx.length,tx,!!r.real)}
+     ${drawer('r-tx',L.tx,r.tx.length,tx,!!r.real&&mins!=='done')}
      ${drawer('r-rec',L.rec,'',rec)}
      ${r.hist.length?drawer('r-hist','Change history',r.hist.length,hist):''}
      <div class="dock">${dock}</div>`);
@@ -657,12 +683,13 @@ const ACT={
  'sp-unmerge'(el){const s=ST.solo,x=s.speakers.find(y=>y.label===el.dataset.l);if(!x)return;delete x.mergedInto;saveSoloSpeakers();render();toast(`Speaker ${x.index} is separate again`);},
  'sp-pick'(el){const i=+el.dataset.i,p=ROSTER.find(r=>r.id===el.dataset.id),c=$('#fc'+i);if(!p)return;c.querySelector('[data-f=n]').value=p.name;c.querySelector('[data-f=d]').value=p.dept;},
  'sp-save'(el){const i=+el.dataset.i,s=ST.solo,x=s.speakers[i],c=$('#fc'+i),v=f=>c.querySelector(`[data-f=${f}]`).value.trim(),n=v('n');
-   const p=rosterBy(n);x.name=n;x.role=v('r');x.dept=v('d');x.org=v('o');x.email=p?p.email:'';x.edited=true;x.open=false;
+   const p=rosterBy(n);x.name=n;x.role=v('r');x.dept=v('d');x.org=v('o');x.email=v('e')||(p?p.email:'');x.phone=v('ph');x.edited=true;x.open=false;
    c.outerHTML=cardHTML(i);syncSolo();toast(n?'Name saved for this voice':'Name cleared');
    saveSoloSpeakers();},
  'solo-open'(){const s=ST.solo;const r=buildRealReport();ST.reports=[r,...ST.reports.filter(x=>x.id!==r.id)];saveReport(r);
    Object.assign(s,{phase:'idle',t:0,paused:false,introEndMs:0,speakers:[],result:null,title:'',rid:null,err:'',mid:null,parts:null,blob:null});
-   openReport(r.id);ST.open['r-tx']=true;render();},
+   openReport(r.id);ST.open['r-tx']=false;render();window.scrollTo(0,0);makeMinutes(r);},
+ 'rep-minutes'(){const r=curRep();if(!r)return;saveAll();makeMinutes(r);},
  'solo-new'(){const s=ST.solo;Object.assign(s,{phase:'idle',t:0,paused:false,introEndMs:0,speakers:[],result:null,title:'',rid:null,err:'',mid:null});render();checkPending();},
  /* ---- group ---- */
  'g-join'(){const g=ST.group;if(!g.live)return;if(!g.joined){g.joined=true;toast('You’re on the invite list. Recording started on your phone.');startGroupSim();}g.phase='meeting';render();window.scrollTo(0,0);},
@@ -702,12 +729,15 @@ const ACT={
      <label class="fld"><span>Title or role (optional)</span><input id="ppR" value="${esc(sp.role||'')}" autocomplete="off" dir="auto"></label>
      <label class="fld"><span>Department (optional)</span><input id="ppD" value="${esc(sp.dept||'')}" autocomplete="off" dir="auto"></label>
      <label class="fld"><span>Organisation (optional)</span><input id="ppO" value="${esc(sp.org||'')}" autocomplete="off" dir="auto"></label>
+     <label class="fld"><span>Email (for sending the report)</span><input id="ppE" type="email" inputmode="email" value="${esc(p.e||'')}" placeholder="name@company.com" autocomplete="off" autocapitalize="none" spellcheck="false"></label>
+     <label class="fld"><span>Phone (optional)</span><input id="ppP" type="tel" inputmode="tel" value="${esc(p.ph||'')}" placeholder="+974 …" autocomplete="off"></label>
      <p style="font-size:13px;margin:0">Giving two speakers the same name joins them into one person.</p>
      <button class="btnk" data-act="rep-person-ok" data-p="${k}">Save</button><button class="btng" data-act="close">Cancel</button></div>`);
-   setTimeout(()=>{const i=$('#ppN');if(i&&unnamed)i.focus();},350);},
+   setTimeout(()=>{const i=el.dataset.focus==='email'?$('#ppE'):$('#ppN');if(i&&(unnamed||el.dataset.focus))i.focus();},350);},
  'rep-person-ok'(el){const r=curRep();const p=r.people[+el.dataset.p];if(!p)return;
-   const n=$('#ppN').value.trim(),role=$('#ppR').value.trim(),dept=$('#ppD').value.trim(),org=$('#ppO').value.trim(),hit=rosterBy(n);
-   for(const l of p.labels){const x=r.speakers.find(y=>y.label===l);if(!x)continue;x.name=n;x.role=role;x.dept=dept||(n&&hit&&!role&&!org?hit.dept:'');x.org=org;x.email=hit?hit.email:'';x.edited=true;}
+   const n=$('#ppN').value.trim(),role=$('#ppR').value.trim(),dept=$('#ppD').value.trim(),org=$('#ppO').value.trim(),email=$('#ppE').value.trim(),phone=$('#ppP').value.trim(),hit=rosterBy(n);
+   if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){toast('That email does not look right');return;}
+   for(const l of p.labels){const x=r.speakers.find(y=>y.label===l);if(!x)continue;x.name=n;x.role=role;x.dept=dept||(n&&hit&&!role&&!org?hit.dept:'');x.org=org;x.email=email||(hit?hit.email:'');x.phone=phone;x.edited=true;}
    const now=n||spName(r.speakers.find(y=>y.label===p.labels[0]));
    if(now!==p.n)r.hist.push({label:'Speaker renamed',from:p.n,to:now,when:hm(new Date())});
    relabel(r);closeSheet();render();toast(now===p.n?'Saved':'Renamed on every line');},
