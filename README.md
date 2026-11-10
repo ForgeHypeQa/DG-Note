@@ -31,7 +31,8 @@ The app opens on a sign-in screen. Accounts are fixed in `server/auth.js` (no da
    - If the phone stops the recording (app sent to the background, screen locked), coming back shows **Continue recording**. If the app was closed, Solo shows **Meeting was interrupted** with **Continue recording**. Each restart is a new part; the server joins the parts into one file (ffmpeg) before transcription.
 4. **End meeting.** The whole recording is uploaded once. The server sends it to Soniox (async, with speaker separation, language detection and English translation).
 5. **Who spoke.** Each voice is matched to the staff list from what it said in the introductions, even if slightly misheard. Names not on the list are kept as spoken. Tap a card to fix a name. Two cards with the same name are joined in the report.
-6. **Meeting report.** Tap **Save names and create report**. ForgeHype Meet writes the minutes from the checked transcript: a 30-second summary, discussion topics, decisions, action items (owner and due date) and open questions. The report opens with these; the transcript is folded underneath. **Write the report again** after changing names or the transcript. Needs `ANTHROPIC_API_KEY` on the server (`REPORT_MODEL` optional).
+6. **Meeting report.** Tap **Save names and create report**. ForgeHype Meet writes the minutes from the checked transcript: a 30-second summary, discussion topics, decisions, action items (owner and due date) and open questions. The report opens with these; the transcript is folded underneath. **Write the report again** after changing names or the transcript. Needs `OPENROUTER_API_KEY` on the server (cheapest; model set by `REPORT_MODEL`, default `qwen/qwen3-30b-a3b-instruct-2507`, e.g. `deepseek/deepseek-chat-v3.1` also works) or `ANTHROPIC_API_KEY`.
+   - **EN · AR · Orig** switch at the top of a report: English (default), Arabic (report and transcript translated on demand and kept; lines first said in Arabic are shown as spoken), Original (transcript exactly as spoken, with your edits). Edits are made in English; Arabic is redone automatically after edits.
 7. **Transcript.** Opens under Reports, with speaker colours, Arabic shown in English with the original underneath, and unclear words in orange (tap to keep or correct).
 
 **Saved on the phone:** finished transcripts, names, edits, change history and the recording are kept on the phone (IndexedDB) for the signed-in account, so reloading, signing out or a server restart loses nothing. In a report, **Recording** has *Save the audio file*, *Save the transcript (.txt)* and *Delete this meeting from the phone*.
@@ -83,7 +84,8 @@ npm test            # name matching and transcript building
 | `server/engine.js` | Speech engine calls (upload, transcribe, poll, fetch, delete). Provider: Soniox, set by `SONIOX_API_KEY` |
 | `server/build.js` | Soniox tokens → speaker segments, English text, unclear words |
 | `server/names.js` | Finds each speaker's name and department in their introduction |
-| `server/minutes.js` | Writes the meeting report (minutes) from the transcript |
+| `server/minutes.js` | Writes the meeting report (minutes) and translates reports |
+| `server/llm.js` | Text AI connection: OpenRouter (any model) or Anthropic |
 | `server/roster.js` | Sample staff list (stands in for the database) |
 | `public/` | The app: `index.html`, `styles.css`, `app.js` |
 | `test/` | Unit tests and the stand-in Soniox server |

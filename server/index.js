@@ -118,13 +118,23 @@ app.post('/api/report', auth.requireUser, express.json({ limit: '3mb' }), async 
   const m = req.body || {};
   if (!Array.isArray(m.segments) || !m.segments.length) return res.status(400).json({ error: 'There is no transcript to write a report from.' });
   try { res.json(await minutes.writeMinutes(m)); }
-  catch (e) {
-    console.error('[report]', e.message);
-    res.status(502).json({ error: e.status === 401 || e.status === 403 ? 'Meeting reports are not set up correctly on the server. Ask the admin.'
-      : e.status === 429 || e.status === 529 ? 'The report writer is busy. Try again in a minute.'
-      : 'The report could not be written. Try again.' });
-  }
+  catch (e) { console.error('[report]', e.message); res.status(502).json({ error: textError(e, 'The report could not be written. Try again.') }); }
 });
+
+// Translation of a report and transcript. Body: { target: 'ar'|'en', items: [string] }
+app.post('/api/translate', auth.requireUser, express.json({ limit: '3mb' }), async (req, res) => {
+  if (!minutes.configured()) return res.status(503).json({ error: 'Translation is not switched on for this server yet. Ask the admin.' });
+  const { target, items } = req.body || {};
+  if (!['ar', 'en'].includes(target) || !Array.isArray(items)) return res.status(400).json({ error: 'Nothing to translate.' });
+  try { res.json({ items: await minutes.translate(items.slice(0, 3000), target) }); }
+  catch (e) { console.error('[translate]', e.message); res.status(502).json({ error: textError(e, 'The translation could not be made. Try again.') }); }
+});
+function textError(e, fallback) {
+  const st = Number(e.status);
+  return st === 401 || st === 403 ? 'Reports and translation are not set up correctly on the server. Ask the admin.'
+    : st === 402 ? 'The report account has run out of credit. Ask the admin.'
+    : st === 429 || st === 529 ? 'The report writer is busy. Try again in a minute.' : fallback;
+}
 
 // What the user sees when something goes wrong: no engine names, no technical detail.
 function friendly(e) {

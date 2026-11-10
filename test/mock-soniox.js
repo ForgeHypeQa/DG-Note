@@ -39,20 +39,33 @@ function tokens() {
 
 app.use((req, res, next) => (req.headers.authorization?.startsWith('Bearer ') || req.headers['x-api-key'] ? next() : res.status(401).json({ message: 'Missing API key' })));
 
-// Stand-in for the report writer (Anthropic Messages API shape). Returns fixed minutes using the attendee names it was sent.
-app.post('/v1/messages', express.json({ limit: '5mb' }), (req, res) => {
-  const text = req.body.messages?.[0]?.content || '';
+// Stand-in for OpenRouter (OpenAI chat shape): translation or minutes.
+app.post('/v1/chat/completions', express.json({ limit: '5mb' }), (req, res) => {
+  const sys = req.body.messages?.[0]?.content || '', user = req.body.messages?.[1]?.content || '';
+  if (/You translate/.test(sys)) {
+    const items = JSON.parse(user).items;
+    console.log('[mock] translate', items.length, 'items');
+    return res.json({ choices: [{ message: { content: JSON.stringify({ items: items.map(t => t ? 'بالعربية: ' + t : '') }) } }] });
+  }
+  const r = minutesFor(user);
+  res.json({ choices: [{ message: { content: r } }] });
+});
+function minutesFor(text) {
   const names = [...text.matchAll(/^- ([^(\n]+?)(?: \(|$)/gm)].map(m => m[1].trim());
   const n = i => names[i] || '';
   console.log('[mock] report for', names.join(', '));
-  res.json({ content: [{ type: 'text', text: JSON.stringify({
+  return JSON.stringify({
     title: 'Falls and Medication Review',
     summary: ['Mr. Khalid in room 12 fell twice this week, both at night.', 'A walker and twice-weekly physiotherapy will start.', 'Night checks move to every two hours from tonight.'],
     topics: [{ topic: 'Falls in room 12', notes: 'Two night-time falls this week; gait is unsteady.' }, { topic: 'Medication', notes: 'Amlodipine 10 mg may cause dizziness on standing.' }],
     decisions: ['Start a walker and physiotherapy twice a week.', 'Night checks every two hours from tonight.'],
     actions: [{ owner: n(1), task: 'Walker assessment', due: 'Tomorrow' }, { owner: n(3), task: 'Book the family meeting', due: 'Thursday' }, { owner: '', task: 'Update the medication chart', due: '' }],
     questions: [{ by: n(2), question: 'Could the dose be reduced further?' }],
-  }) }] });
+  });
+}
+// Stand-in for Anthropic (Messages API shape).
+app.post('/v1/messages', express.json({ limit: '5mb' }), (req, res) => {
+  res.json({ content: [{ type: 'text', text: minutesFor(req.body.messages?.[0]?.content || '') }] });
 });
 
 app.post('/v1/files', express.raw({ type: () => true, limit: '500mb' }), (req, res) => {
