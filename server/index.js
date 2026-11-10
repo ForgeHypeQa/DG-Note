@@ -10,6 +10,7 @@ import * as soniox from './soniox.js';
 import { buildResult } from './build.js';
 import { ROSTER, DEPARTMENTS, DOMAIN_TERMS } from './roster.js';
 import * as auth from './auth.js';
+import { splitParts, joinParts } from './audio.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,7 +27,8 @@ auth.mount(app, express);
 app.get('/api/health', (req, res) => res.json({ ok: true, soniox: soniox.configured(), model: soniox.MODEL }));
 app.get('/api/roster', auth.requireUser, (req, res) => res.json({ people: ROSTER, departments: Object.keys(DEPARTMENTS) }));
 
-// Body = the raw audio file. Query: title, introEndMs, durationMs.
+// Body = the raw audio file (or several parts back to back, with header
+// X-Parts: "size1,size2,..."). Query: title, introEndMs, durationMs.
 app.post('/api/solo/jobs', auth.requireUser, express.raw({ type: () => true, limit: '500mb' }), (req, res) => {
   if (!soniox.configured()) return res.status(503).json({ error: 'The server has no SONIOX_API_KEY. Add it to .env and restart.' });
   const buf = req.body;
@@ -40,8 +42,12 @@ app.post('/api/solo/jobs', auth.requireUser, express.raw({ type: () => true, lim
     durationMs: Math.max(0, +req.query.durationMs || 0),
     bytes: buf.length,
   };
+  let parts;
+  try { parts = req.headers['x-parts'] ? splitParts(buf, String(req.headers['x-parts']).split(',').map(Number)) : [buf]; }
+  catch (e) { return res.status(400).json({ error: e.message }); }
+  job.parts = parts.length;
   jobs.set(job.id, job);
-  run(job, buf, mime, `dg-note-${job.id}.${ext}`);
+  run(job, parts, mime, ext);
   res.status(202).json({ id: job.id, status: job.status, step: job.step });
 });
 
@@ -52,10 +58,15 @@ app.get('/api/solo/jobs/:id', auth.requireUser, (req, res) => {
   res.json({ id, status, step, error, title, result });
 });
 
-async function run(job, buf, mime, filename) {
+async function run(job, parts, mime, ext) {
   let fileId, trId;
   try {
-    const file = await soniox.uploadFile(buf, filename, mime);
+    if (parts.length > 1) job.step = 'joining';
+    const joined = await joinParts(parts, ext);
+    parts = null;
+    let buf = joined.buffer;
+    if (joined.joined) { mime = joined.mime; ext = joined.ext; job.step = 'upload'; }
+    const file = await soniox.uploadFile(buf, `dg-note-${job.id}.${ext}`, mime);
     fileId = file.id;
     buf = null; // let the audio go from memory
     job.step = 'queued';

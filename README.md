@@ -19,16 +19,19 @@ The app opens on a sign-in screen. Accounts are fixed in `server/auth.js` (no da
 - A seat is freed when someone signs out, or after 3 minutes without the app open.
 - 8 wrong passwords in a minute pauses that account for a minute.
 - Logins and passwords are stored only as salted scrypt hashes. To change the admin login, set `ADMIN_LOGIN_HASH` and `ADMIN_PASSWORD_HASH` in the host's environment (make them with `node -e "const c=require('crypto');const s=c.randomBytes(16).toString('hex');console.log(s+':'+c.scryptSync(process.argv[1],s,32).toString('hex'))" 'value'`).
-- Sessions are kept in memory, so a server restart (or Render waking from sleep) signs everyone out.
+- Sign-in lasts 7 days and survives server restarts (signed cookie, key from `SESSION_SECRET`). Leaving the app does not sign you out: after 3 minutes away you only give up your seat. Coming back, you get a seat again if one is free; otherwise the app says the demo is full and nothing is lost.
 
 ## How Solo works
 
 1. **Start meeting.** The phone says "This meeting will be recorded for digital records." Recording starts.
 2. **Introductions.** Each person says their name and department, e.g. "Hi, I'm Sara Mendes from Nursing" or «أنا نورة السليطي من الصيدلة». Tap **Introductions done**.
-3. **Meeting.** Talk as usual. Audio is saved on the phone every 10 seconds (IndexedDB), so a dropped connection or a reload loses nothing.
+3. **Meeting.** Talk as usual. Audio is saved on the phone every 5 seconds (IndexedDB), so a dropped connection or a reload loses nothing.
+   - If the phone stops the recording (app sent to the background, screen locked), coming back shows **Continue recording**. If the app was closed, Solo shows **Meeting was interrupted** with **Continue recording**. Each restart is a new part; the server joins the parts into one file (ffmpeg) before transcription.
 4. **End meeting.** The whole recording is uploaded once. The server sends it to Soniox (async, with speaker separation, language detection and English translation).
 5. **Who spoke.** Each voice is matched to the staff list from what it said in the introductions, even if slightly misheard. Names not on the list are kept as spoken. Tap a card to fix a name. Two cards with the same name are joined in the report.
 6. **Transcript.** Opens under Reports, with speaker colours, Arabic shown in English with the original underneath, and unclear words in orange (tap to keep or correct).
+
+**Saved on the phone:** finished transcripts, names, edits, change history and the recording are kept on the phone (IndexedDB) for the signed-in account, so reloading, signing out or a server restart loses nothing. In a report, **Recording** has *Save the audio file*, *Save the transcript (.txt)* and *Delete this meeting from the phone*.
 
 There is **no database yet**. The server keeps the audio in memory only while sending it to Soniox, then deletes the file and transcription from Soniox. Results are held in memory for one hour. The recording stays on the phone.
 

@@ -338,3 +338,6 @@ svg.i.s{width:16px;height:16px}
 .arow .dot.on{background:#12B76A;box-shadow:0 0 0 3px #DDF4E8}
 .bsheet .pillg{background:var(--paper);color:var(--ink);padding:7px 12px;font-size:13px}
 .bsheet .pillg.off{background:var(--ink);color:#fff}
+.btn2.danger{color:#C42B1C}
+.t-dark .btn2.danger{color:#FF8A80}
+.pendb{flex-wrap:wrap}.pendb button{white-space:nowrap}

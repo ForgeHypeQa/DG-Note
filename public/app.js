@@ -126,37 +126,62 @@ async function loadServer(){
 const rosterBy=n=>ROSTER.find(p=>p.name.toLowerCase()===String(n).trim().toLowerCase());
 
 /* --- storage on this phone (IndexedDB). No server database. --- */
+// Everything is kept on this phone until the database is connected:
+//   meetings: one row per recording (title, times, owner, state)
+//   chunks:   the audio, saved every 5 s while recording (part = a new piece after the phone stopped recording)
+//   reports:  finished transcripts with names, edits, change history and the audio
 const DB={db:null,
-  open(){return this.db||(this.db=new Promise((res,rej)=>{const q=indexedDB.open('dg-note',1);q.onupgradeneeded=()=>{const d=q.result;d.createObjectStore('meetings',{keyPath:'mid'});d.createObjectStore('chunks',{keyPath:['mid','i']});};q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);}));},
+  open(){return this.db||(this.db=new Promise((res,rej)=>{const q=indexedDB.open('dg-note',2);q.onupgradeneeded=()=>{const d=q.result;
+    if(!d.objectStoreNames.contains('meetings'))d.createObjectStore('meetings',{keyPath:'mid'});
+    if(!d.objectStoreNames.contains('chunks'))d.createObjectStore('chunks',{keyPath:['mid','i']});
+    if(!d.objectStoreNames.contains('reports'))d.createObjectStore('reports',{keyPath:'id'});};
+    q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);}));},
   async run(store,mode,fn){const d=await this.open();return new Promise((res,rej)=>{const t=d.transaction(store,mode);const q=fn(t.objectStore(store));t.oncomplete=()=>res(q&&'result' in q?q.result:undefined);t.onerror=()=>rej(t.error);});},
   put(store,v){return this.run(store,'readwrite',s=>s.put(v));},
   get(store,k){return this.run(store,'readonly',s=>s.get(k));},
   all(store){return this.run(store,'readonly',s=>s.getAll());},
-  async chunks(mid){const a=await this.run('chunks','readonly',s=>s.getAll(IDBKeyRange.bound([mid,0],[mid,Infinity])));return (a||[]).sort((x,y)=>x.i-y.i).map(c=>c.blob);},
+  async rawChunks(mid){const a=await this.run('chunks','readonly',s=>s.getAll(IDBKeyRange.bound([mid,0],[mid,Infinity])));return (a||[]).sort((x,y)=>x.i-y.i);},
+  // returns one Blob per recorded part
+  async parts(mid,mime){const by=new Map();for(const c of await this.rawChunks(mid)){const p=c.part||0;if(!by.has(p))by.set(p,[]);by.get(p).push(c.blob);}
+    return [...by.keys()].sort((a,b)=>a-b).map(k=>new Blob(by.get(k),{type:mime||'audio/webm'}));},
+  del(store,k){return this.run(store,'readwrite',s=>s.delete(k));},
   async remove(mid){await this.run('chunks','readwrite',s=>s.delete(IDBKeyRange.bound([mid,0],[mid,Infinity])));await this.run('meetings','readwrite',s=>s.delete(mid));},
   async patch(mid,v){const m=await this.get('meetings',mid);if(m)await this.put('meetings',{...m,...v});},
 };
 
 /* --- recorder --- */
-const REC={stream:null,mr:null,mime:'',mid:null,i:0,bytes:0,saves:[],ctx:null,raf:0,lock:null,hiddenAt:0};
+const REC={stream:null,mr:null,mime:'',mid:null,i:0,part:0,bytes:0,saves:[],ctx:null,raf:0,lock:null,hiddenAt:0,stopping:false,lost:false};
 function pickMime(){for(const m of ['audio/webm;codecs=opus','audio/mp4','audio/ogg;codecs=opus','audio/webm'])if(window.MediaRecorder&&MediaRecorder.isTypeSupported(m))return m;return '';}
 const recording=()=>REC.mr&&REC.mr.state!=='inactive';
 const savedTxt=()=>`Saved on this phone · ${(REC.bytes/1048576).toFixed(1)} MB`;
-async function recStart(){
+async function recStart(continueMid){
   if(!window.isSecureContext) throw new Error('The microphone only works over https (or on localhost). Open DG-Note from its https address.');
   if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder) throw new Error('This browser cannot record audio. Use Chrome on Android or Safari on iPhone.');
   const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:true,channelCount:1}});
   const mime=pickMime(), mr=new MediaRecorder(stream,mime?{mimeType:mime,audioBitsPerSecond:64000}:{});
-  const mid='m'+Date.now();
-  Object.assign(REC,{stream,mr,mime:(mr.mimeType||mime||'audio/webm'),mid,i:0,bytes:0,saves:[]});
-  await DB.put('meetings',{mid,title:ST.solo.title,mime:REC.mime,startedAt:Date.now(),introEndMs:0,durationSec:0,state:'recording'});
+  let mid,part=0,i=0,bytes=0;
+  if(continueMid){
+    mid=continueMid;const old=await DB.rawChunks(mid);
+    part=old.reduce((m,c)=>Math.max(m,(c.part||0)+1),0);i=old.reduce((m,c)=>Math.max(m,c.i+1),0);bytes=old.reduce((n,c)=>n+(c.blob?.size||0),0);
+    await DB.patch(mid,{state:'recording',parts:part+1});
+  }else{
+    mid='m'+Date.now();
+    await DB.put('meetings',{mid,owner:ME_USER?.id,title:ST.solo.title,mime:(mr.mimeType||mime||'audio/webm'),startedAt:Date.now(),introEndMs:0,durationSec:0,state:'recording',parts:1});
+  }
+  Object.assign(REC,{stream,mr,mime:(mr.mimeType||mime||'audio/webm'),mid,i,part,bytes,saves:[],stopping:false,lost:false});
+  try{navigator.storage?.persist?.();}catch(e){}
   mr.ondataavailable=e=>{ if(!e.data||!e.data.size) return; REC.bytes+=e.data.size;
-    REC.saves.push(DB.put('chunks',{mid,i:REC.i++,blob:e.data}).catch(()=>toast('Could not save audio on this phone. Is storage full?')));
+    REC.saves.push(DB.put('chunks',{mid,i:REC.i++,part,blob:e.data}).catch(()=>toast('Could not save audio on this phone. Is storage full?')));
+    DB.patch(mid,{durationSec:ST.solo.t,introEndMs:ST.solo.introEndMs}).catch(()=>{});
     const el=$('#sSaved'); if(el) el.textContent=savedTxt(); };
-  mr.start(10000);
+  // The phone (not us) stopped the recording: usually because the app went to the background.
+  mr.onstop=()=>{ if(!REC.stopping){ REC.lost=true; DB.patch(mid,{durationSec:ST.solo.t}).catch(()=>{}); if(document.visibilityState==='visible') recLost(); } };
+  stream.getAudioTracks().forEach(t=>t.addEventListener('ended',()=>{ if(!REC.stopping&&REC.mr&&REC.mr.state!=='inactive'){ try{REC.mr.stop();}catch(e){} } }));
+  mr.start(5000);
   meter(stream); wake(true);
 }
 function recStop(){
+  REC.stopping=true;
   return new Promise(res=>{const mr=REC.mr;if(!mr||mr.state==='inactive')return res();mr.onstop=()=>setTimeout(res,30);mr.stop();})
    .then(()=>Promise.all(REC.saves)).then(()=>{REC.stream?.getTracks().forEach(t=>t.stop());cancelAnimationFrame(REC.raf);try{REC.ctx?.close();}catch(e){}wake(false);});
 }
@@ -167,52 +192,63 @@ function meter(stream){
       $$('#tbl .tph i').forEach((b,k)=>b.style.height=(5+lv*(14+k*5))+'px');REC.raf=requestAnimationFrame(loop);};loop();}catch(e){}
 }
 async function wake(on){try{if(on&&'wakeLock' in navigator)REC.lock=await navigator.wakeLock.request('screen');else if(!on&&REC.lock){await REC.lock.release();REC.lock=null;}}catch(e){}}
+function recLost(){
+  const s=ST.solo;if(!(s.phase==='intro'||s.phase==='meet'))return;
+  render();
+  sheet(`<div class="bigic">${I('mic')}</div><h3>Recording stopped while DG-Note was in the background</h3><p>Everything up to ${mmss(s.t)} is saved on this phone. Continue to record the rest of the meeting into the same file.</p><div class="stk"><button class="btnk" data-act="solo-continue-now">Continue recording</button><button class="btng" data-act="solo-end-ok">End meeting and send</button></div>`);
+}
 document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&ME_USER)fetch(API+'/api/me').catch(()=>{});
+  if(document.visibilityState==='hidden'){if(recording())REC.hiddenAt=Date.now();return;}
+  if(REC.lost||(REC.mr&&REC.mr.state==='inactive'&&!REC.stopping&&(ST.solo.phase==='intro'||ST.solo.phase==='meet'))){REC.lost=true;recLost();return;}
   if(!recording())return;
-  if(document.visibilityState==='hidden'){REC.hiddenAt=Date.now();return;}
   wake(true);
-  if(REC.hiddenAt&&Date.now()-REC.hiddenAt>3000)toast('Keep DG-Note open on screen. Phones can stop recording when the browser is in the background.');
+  if(REC.hiddenAt&&Date.now()-REC.hiddenAt>3000)toast('Welcome back. Still recording. Keep DG-Note on screen: some phones stop recording in the background.');
   REC.hiddenAt=0;
 });
 
 /* --- processing --- */
 const STEPS=[['save','Saving the recording on this phone'],['upload','Sending it to the server'],['queued','Waiting for Soniox'],['processing','Transcribing Arabic and English'],['naming','Naming speakers from the introductions']];
 const stepIx=st=>st==='completed'?4:st==='done'?5:Math.max(0,STEPS.findIndex(x=>x[0]===st));
-function upload(url,blob,onp){return new Promise((res,rej)=>{const x=new XMLHttpRequest();x.open('POST',url);x.setRequestHeader('Content-Type',(blob.type||'audio/webm').split(';')[0]);
+function upload(url,blob,onp,headers){return new Promise((res,rej)=>{const x=new XMLHttpRequest();x.open('POST',url);x.setRequestHeader('Content-Type',(blob.type||'audio/webm').split(';')[0]);
+  for(const [k,v] of Object.entries(headers||{}))x.setRequestHeader(k,v);
   x.upload.onprogress=e=>e.lengthComputable&&onp(e.loaded/e.total);
-  x.onload=()=>{let b={};try{b=JSON.parse(x.responseText);}catch(e){}x.status<300?res(b):rej(new Error(b.error||('Upload failed ('+x.status+')')));};
+  x.onload=()=>{let b={};try{b=JSON.parse(x.responseText);}catch(e){}x.status<300?res(b):rej(new Error(x.status===401?'Please sign in again. Your recording is safe on this phone.':b.error||('Upload failed ('+x.status+')')));};
   x.onerror=()=>rej(new Error('Upload failed. Check the connection. Your recording is safe on this phone.'));x.send(blob);});}
 async function processMeeting(mid,fileBlob){
   const s=ST.solo; Object.assign(s,{phase:'proc',step:'save',err:'',upPct:0,mid,result:null,rid:null}); render(); window.scrollTo(0,0);
   try{
-    let blob=fileBlob;
-    if(!blob){const meta=await DB.get('meetings',mid)||{};const parts=await DB.chunks(mid);if(!parts.length)throw new Error('No audio was saved on this phone for this meeting.');
-      blob=new Blob(parts,{type:meta.mime||'audio/webm'});await DB.patch(mid,{state:'ended'});}
-    s.blob=blob;
+    let parts=fileBlob?[fileBlob]:null;
+    if(!parts){const meta=await DB.get('meetings',mid)||{};parts=(await DB.parts(mid,meta.mime)).filter(b=>b.size);if(!parts.length)throw new Error('No audio was saved on this phone for this meeting.');
+      await DB.patch(mid,{state:'ended'});}
+    s.parts=parts; s.blob=parts[0];
+    const blob=parts.length>1?new Blob(parts,{type:parts[0].type}):parts[0];
     if(!HEALTH||HEALTH.offline)await loadServer();
     if(HEALTH?.offline)throw new Error('Cannot reach the DG-Note server. Your recording is safe on this phone. Try again when you are online.');
     if(!HEALTH.soniox)throw new Error('The server has no Soniox key yet. Add SONIOX_API_KEY to the .env file and restart the server.');
     s.step='upload';render();
     const q=new URLSearchParams({title:s.title||'',introEndMs:String(Math.round(s.introEndMs||0)),durationMs:String(Math.round((s.t||0)*1000))});
-    const job=await upload(API+'/api/solo/jobs?'+q,blob,p=>{s.upPct=p;const e=$('#upPct');if(e)e.textContent=Math.round(p*100)+'%';});
+    const job=await upload(API+'/api/solo/jobs?'+q,blob,p=>{s.upPct=p;const e=$('#upPct');if(e)e.textContent=Math.round(p*100)+'%';},parts.length>1?{'X-Parts':parts.map(b=>b.size).join(',')}:{});
     s.step='queued';render();
     for(;;){
       await new Promise(r=>setTimeout(r,2000));
       const r=await fetch(API+'/api/solo/jobs/'+job.id);const j=await r.json().catch(()=>({}));
-      if(!r.ok)throw new Error(j.error||('Server error '+r.status));
+      if(!r.ok)throw new Error(r.status===401?'Please sign in again. Your recording is safe on this phone.':j.error||('Server error '+r.status));
       if(j.status==='error')throw new Error(j.error||'Transcription failed.');
       if(j.status==='done'){s.result=j.result;break;}
       if(j.step!==s.step){s.step=j.step;if(ST.tab==='solo'&&s.phase==='proc')render();}
     }
-    if(mid)DB.patch(mid,{state:'done'}).catch(()=>{});
     s.speakers=s.result.speakers.map((x,i)=>({...x,c:C[i%C.length],open:false,edited:false}));
     if(!s.speakers.length)throw new Error('No speech was found in the recording.');
+    // Save straight away so nothing is lost if the app is closed on the next screen.
+    const r=buildRealReport();r.stage='review';ST.reports.unshift(r);s.rid=r.id;await saveReport(r);
+    if(mid)await DB.patch(mid,{state:'done',rid:r.id}).catch(()=>{});
     s.phase='review';
     if(ST.tab==='solo')render();else toast('Transcript ready. Open Solo to check the names.');
   }catch(e){s.phase='error';s.err=e.message||String(e);if(ST.tab==='solo')render();else toast('Solo: '+esc(s.err));}
 }
 async function checkPending(){
-  try{const ms=(await DB.all('meetings')||[]).filter(m=>m.state!=='done'&&m.mid!==REC.mid);
+  try{const ms=(await DB.all('meetings')||[]).filter(m=>m.state!=='done'&&m.mid!==REC.mid&&(!m.owner||m.owner===ME_USER?.id||ME_USER?.role==='admin'));
     ST.solo.pending=ms.sort((a,b)=>b.startedAt-a.startedAt)[0]||null;
     if(ST.tab==='solo'&&ST.solo.phase==='idle')render();}catch(e){}
 }
@@ -257,7 +293,7 @@ function viewSolo(){
   if(s.phase==='idle') return capsheet(
     `<div class="eyebrow">One device on the table</div><h1 class="lt">Solo</h1><p class="sub">For up to 4 people sitting within 1 metre. The app tells the voices apart.</p>${tableHTML()}`,
     `${serverNote()}
-     ${s.pending?`<div class="pend"><span class="rico">${I('mic')}</span><div class="grow"><b>Recording not sent yet</b><small>${esc(s.pending.title||'Untitled')} · ${new Date(s.pending.startedAt).toLocaleString([], {weekday:'short',hour:'2-digit',minute:'2-digit'})}</small><div class="pendb"><button class="pillk" data-act="solo-pending">Send it now</button><button class="pillg" data-act="solo-discard">Delete</button></div></div></div>`:''}
+     ${s.pending?`<div class="pend"><span class="rico">${I('mic')}</span><div class="grow"><b>${s.pending.state==='recording'?'Meeting was interrupted':'Recording not sent yet'}</b><small>${esc(s.pending.title||'Untitled')} · ${new Date(s.pending.startedAt).toLocaleString([], {weekday:'short',hour:'2-digit',minute:'2-digit'})}</small><small style="display:block">${s.pending.durationSec?mmss(s.pending.durationSec)+' saved on this phone':''}</small><div class="pendb">${s.pending.state==='recording'?'<button class="pillk" data-act="solo-continue">Continue recording</button><button class="pillg" data-act="solo-pending">Send it</button>':'<button class="pillk" data-act="solo-pending">Send it now</button>'}<button class="pillg" data-act="solo-discard">Delete</button></div></div></div>`:''}
      <label class="fld"><span>Meeting title</span><input id="soloTitle" value="${esc(s.title)}" placeholder="Optional" autocomplete="off"></label>
      <button class="cta" data-act="solo-start">${I('mic')}Start meeting</button>
      <p class="fine">First the app announces that the meeting is recorded for digital records.</p>
@@ -314,10 +350,41 @@ function buildRealReport(){
     if(!(key in idx)){idx[key]=people.length;people.push({n,d:x.dept||'',e:x.email||rosterBy(n)?.email||'',c:x.c});}
     mapP[x.label]=idx[key];});
   const dms=res.durationMs||(s.t||0)*1000, st=s.startedAt?new Date(s.startedAt):new Date(Date.now()-dms), en=new Date(st.getTime()+dms);
-  return {id:'R'+Date.now(),kind:'solo',real:true,title:s.title.trim()||('Solo meeting · '+hm(st)),when:'Today',time:hm(st)+' – '+hm(en),dur:durTxt(dms/1000),
-    by:'This phone',status:'draft',people,sum:[],dec:[],act:[],qs:[],langs:res.languages||[],
+  const old=s.rid&&ST.reports.find(x=>x.id===s.rid);
+  const parts=s.parts||(s.blob?[s.blob]:[]);
+  const keep=old?{res:old.res,ed:old.ed,hist:old.hist,add:old.add,status:old.status,sentAt:old.sentAt}:blank();
+  return {id:s.rid||('R'+Date.now()),owner:ME_USER?.id,mid:s.mid||null,stage:'done',createdAt:old?.createdAt||Date.now(),
+    result:res,speakers:s.speakers.map(({open,...x})=>x),startedAt:s.startedAt||null,
+    kind:'solo',real:true,title:s.title.trim()||('Solo meeting · '+hm(st)),when:st.toDateString()===new Date().toDateString()?'Today':st.toLocaleDateString([],{weekday:'short',day:'numeric',month:'short'}),
+    time:hm(st)+' – '+hm(en),dur:durTxt(dms/1000),by:ME_USER?.name||'This phone',status:'draft',people,sum:[],dec:[],act:[],qs:[],langs:res.languages||[],
     tx:res.segments.map(g=>({p:mapP[g.speaker]??0,t:mmss(g.startMs/1000),s:g.text,o:g.orig||undefined})),
-    tr:{},audio:s.blob?URL.createObjectURL(s.blob):'',audioName:audioName(),...blank()};
+    tr:{},_blobs:parts,audios:parts.map(b=>URL.createObjectURL(b)),audioName:audioName(),...keep};
+}
+
+/* --- saving reports on this phone --- */
+const _saveT={};
+function saveReport(r){
+  if(!r||!r.real)return Promise.resolve();
+  clearTimeout(_saveT[r.id]);
+  return new Promise(res=>{_saveT[r.id]=setTimeout(async()=>{
+    try{const {audios,_blobs,...data}=r;await DB.put('reports',{...JSON.parse(JSON.stringify(data)),_blobs:_blobs||[]});}
+    catch(e){toast('Could not save on this phone: '+esc(e.message));}
+    res();},150);});
+}
+async function loadSaved(){
+  try{
+    const mine=(await DB.all('reports')||[]).filter(r=>r.owner===ME_USER?.id||ME_USER?.role==='admin').sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+    for(const r of mine){r.audios=(r._blobs||[]).map(b=>URL.createObjectURL(b));}
+    ST.reports=[...mine,...ST.reports.filter(x=>!x.real)];
+    // A transcript that was still waiting for names comes back to the "Who spoke" screen.
+    const rv=mine.find(r=>r.stage==='review'&&r.owner===ME_USER?.id);
+    if(rv){Object.assign(ST.solo,{phase:'review',rid:rv.id,mid:rv.mid,result:rv.result,title:rv.title.startsWith('Solo meeting · ')?'':rv.title,startedAt:rv.startedAt,
+      speakers:rv.speakers.map(x=>({...x,open:false})),parts:rv._blobs,blob:(rv._blobs||[])[0]});}
+  }catch(e){}
+}
+async function deleteReport(r){
+  try{await DB.del('reports',r.id);if(r.mid)await DB.remove(r.mid);}catch(e){}
+  ST.reports=ST.reports.filter(x=>x.id!==r.id);
 }
 
 /* ================= GROUP ================= */
@@ -471,7 +538,7 @@ function repDetail(r){
   const tx=`<p class="note">${r.real?'Arabic is shown in English, with what was said underneath.':'Clean transcript: grammar fixed and filler words removed.'} ${lang!=='en'?'Shown in English with the original words underneath.':'Orange words were unclear in the audio. Tap one to check it.'}</p>`+r.tx.map((l,i)=>{const p=who(l.p);return `<div class="txl"><div class="th"><span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span><span>${l.t}</span></div><div class="tt" ${E('t'+i,'tx')}>${rt(r,'t'+i,l.s)}</div>${l.o?`<div class="to" lang="ar">${esc(l.o)}</div>`:''}</div>`;}).join('');
   let seed=7;const rnd=()=>{seed=(seed*16807)%2147483647;return seed/2147483647;};
   const bars=r.tx.map(l=>Array.from({length:Math.max(4,Math.round(l.s.length/12))},()=>`<i style="--c:${who(l.p).c};height:${20+Math.round(rnd()*80)}%"></i>`).join('')+'<i style="--c:#D5D2D0;height:8%"></i>').join('');
-  const rec=r.real?(r.audio?`<audio class="aud" controls preload="metadata" src="${r.audio}"></audio><button class="btn2" style="margin-top:10px" data-act="rep-dl">Save the audio file</button><p class="fine" style="text-align:start;margin-top:8px">The recording is on this phone only. It was deleted from the server and Soniox after transcription.</p>`:'<p class="note">The audio stays on the phone that recorded it.</p>'):`<div style="display:flex;gap:12px;align-items:center"><button class="playb" data-act="rep-play" aria-label="Play recording">${I(ST.rep.play?'pause':'play')}</button><div class="grow"><b style="font-size:15px">${esc(r.title.replace(/[^A-Za-z0-9]+/g,'_'))}.mp3</b><div style="font-size:13px;color:var(--fg2)">${r.dur} · ${r.people.length} speakers · kept for 30 days</div></div></div><div class="wavebars" id="wave">${bars}</div><p class="fine" style="text-align:start;margin-top:8px">Colours show who is speaking. Playback is simulated in this prototype.</p>`;
+  const rec=r.real?((r.audios||[]).length?(r.audios.length>1?`<p class="note" style="margin-bottom:8px">Recorded in ${r.audios.length} parts because the phone paused the recording. The transcript covers all parts.</p>`:'')+r.audios.map((u,k)=>`${r.audios.length>1?`<b style="display:block;font-size:13px;margin:8px 0 4px">Part ${k+1}</b>`:''}<audio class="aud" controls preload="metadata" src="${u}"></audio>`).join('')+`<button class="btn2" style="margin-top:10px" data-act="rep-dl">Save the audio file${r.audios.length>1?'s':''}</button><button class="btn2" style="margin-top:8px" data-act="rep-txt">Save the transcript (.txt)</button><button class="btn2 danger" style="margin-top:8px" data-act="rep-del">Delete this meeting from the phone</button><p class="fine" style="text-align:start;margin-top:8px">Saved on this phone. The server and Soniox delete their copy after transcription.</p>`:'<p class="note">The audio stays on the phone that recorded it.</p>'):`<div style="display:flex;gap:12px;align-items:center"><button class="playb" data-act="rep-play" aria-label="Play recording">${I(ST.rep.play?'pause':'play')}</button><div class="grow"><b style="font-size:15px">${esc(r.title.replace(/[^A-Za-z0-9]+/g,'_'))}.mp3</b><div style="font-size:13px;color:var(--fg2)">${r.dur} · ${r.people.length} speakers · kept for 30 days</div></div></div><div class="wavebars" id="wave">${bars}</div><p class="fine" style="text-align:start;margin-top:8px">Colours show who is speaking. Playback is simulated in this prototype.</p>`;
   const hist=r.hist.slice().reverse().map(h=>`<div class="hrow2"><small>${esc(h.label)} · ${h.when}</small><s>${esc(h.from)}</s><div>${esc(h.to)}</div></div>`).join('');
   const dock=ed&&r.real?`<button class="dbt k" data-act="rep-edit">Done</button>`:ed?`<button class="dbt" data-act="rep-dictate" ${ST.rep.dictating?'disabled':''}>${I('mic','s')}${ST.rep.dictating?'Listening…':'Dictate'}</button><button class="dbt k" data-act="rep-edit">Done</button>`
     :r.status==='sent'?`<span class="sentl">${I('check','s')}${r.real?'Approved':'Sent to '+r.people.filter(p=>p.e).length+' people'}</span><button class="dbt ic" data-act="rep-copy" aria-label="Copy summary">${I('copy','s')}</button>`
@@ -503,6 +570,7 @@ function stopPlay(){if(ST.rep.play){clearInterval(ST.rep.play);ST.rep.play=null;
 
 /* ================= render ================= */
 function render(){
+  const cr=ST.rep&&ST.rep.id&&ST.reports.find(r=>r.id===ST.rep.id);if(cr&&cr.real)saveReport(cr);
   const app=$('#app'); app.className='app '+(ST.tab==='solo'?'t-dark':'t-mix');
   $$('.tabs button').forEach(b=>{const on=b.dataset.tab===ST.tab;b.classList.toggle('on',on);b.setAttribute('aria-selected',on);});
   const d=ST.reports.filter(r=>r.status==='draft').length, bd=$('#repBadge'); bd.textContent=d; bd.classList.toggle('on',d>0&&ST.tab!=='reports');
@@ -520,7 +588,7 @@ const ACT={
  async 'adm-out'(el){await api('/api/admin/signout',{id:el.dataset.id});toast(esc(el.dataset.n)+' signed out');openAccount();},
  async 'adm-en'(el){const on=el.dataset.on!=='1';await api('/api/admin/enable',{id:el.dataset.id,enabled:on});toast(esc(el.dataset.n)+(on?' switched on':' switched off'));openAccount();},
  'pw-eye'(){const i=$('#lgPw');i.type=i.type==='password'?'text':'password';},
- restart(){closeSheet();if(recording())return toast('End the Solo meeting first');fresh();render();window.scrollTo(0,0);toast('Demo restarted');},
+ async restart(){closeSheet();if(recording())return toast('End the Solo meeting first');fresh();await loadSaved();render();window.scrollTo(0,0);toast('Sample data reset. Your recorded meetings are kept.');},
  close(){closeSheet();},
  /* ---- solo ---- */
  'solo-start'(){sheet(`<div class="bigic">${I('speaker')}</div><h3>The app tells everyone first</h3><div class="quote">“This meeting will be recorded for digital records.”</div><p>The phone says it aloud when recording starts, so it is on the record too. Then each person says their name and department.</p><div class="stk"><button class="btnk" data-act="solo-go">Everyone agrees · Start recording</button><button class="btng" data-act="close">Cancel</button></div>`);},
@@ -535,7 +603,7 @@ const ACT={
  'solo-pause'(){const s=ST.solo;s.paused=!s.paused;try{s.paused?REC.mr.pause():REC.mr.resume();}catch(e){}
    $('#sPause').innerHTML=s.paused?I('play','s')+'Resume':I('pause','s')+'Pause';const r=$('#sRec');r.classList.toggle('paused',s.paused);r.querySelector('b').textContent=s.paused?'PAUSED':'REC';syncSolo();},
  'solo-end'(){sheet(`<h3>End this meeting?</h3><p>Recording stops. The audio is sent once, transcribed, and each voice is named from the introductions.</p><div class="stk"><button class="btnr" data-act="solo-end-ok">End meeting</button><button class="btng" data-act="close">Keep recording</button></div>`);},
- async 'solo-end-ok'(){closeSheet();const s=ST.solo;if(s.phase==='intro')s.introEndMs=s.t*1000;s.paused=false;
+ async 'solo-end-ok'(){closeSheet();const s=ST.solo;if(!(s.phase==='intro'||s.phase==='meet'))return;if(s.phase==='intro')s.introEndMs=s.t*1000;s.paused=false;
    const mid=REC.mid;s.phase='proc';s.step='save';render();
    await recStop();await DB.patch(mid,{state:'ended',durationSec:s.t,introEndMs:s.introEndMs}).catch(()=>{});
    processMeeting(mid);},
@@ -543,14 +611,26 @@ const ACT={
  'solo-retry'(){const s=ST.solo;processMeeting(s.mid,s.mid?null:s.blob);},
  'solo-file'(){$('#fileIn').click();},
  'solo-save-audio'(){saveAudio(ST.solo.blob,audioName());},
+ async 'solo-continue'(){const s=ST.solo,m=s.pending;if(!m)return;
+   try{await recStart(m.mid);}catch(e){sheet(`<h3>Cannot use the microphone</h3><p>${esc(e.message||String(e))}</p><div class="stk"><button class="btnk" data-act="close">OK</button></div>`);return;}
+   Object.assign(s,{title:m.title||'',introEndMs:m.introEndMs||0,t:m.durationSec||0,startedAt:m.startedAt,pending:null,paused:false,mid:m.mid,phase:m.introEndMs?'meet':'intro',speakers:[],result:null,rid:null});
+   render();window.scrollTo(0,0);toast('Recording again. The new part joins the same meeting.');},
+ async 'solo-continue-now'(){closeSheet();const s=ST.solo;
+   try{REC.stopping=true;REC.stream?.getTracks().forEach(t=>t.stop());cancelAnimationFrame(REC.raf);try{REC.ctx?.close();}catch(e){}
+     await Promise.all(REC.saves);await recStart(REC.mid);}
+   catch(e){sheet(`<h3>Cannot use the microphone</h3><p>${esc(e.message||String(e))}</p><div class="stk"><button class="btnk" data-act="solo-end-ok">End meeting and send</button></div>`);return;}
+   s.paused=false;render();toast('Recording again. The new part joins the same meeting.');},
  'solo-pending'(){const s=ST.solo,m=s.pending;if(!m)return;Object.assign(s,{title:m.title||'',introEndMs:m.introEndMs||0,t:m.durationSec||0,startedAt:m.startedAt,pending:null});processMeeting(m.mid);},
  async 'solo-discard'(){const s=ST.solo;if(!s.pending)return;await DB.remove(s.pending.mid).catch(()=>{});s.pending=null;render();toast('Recording deleted from this phone');},
  'sp-toggle'(el){const i=+el.dataset.i,x=ST.solo.speakers[i];x.open=!x.open;$('#fc'+i).classList.toggle('open',x.open);el.setAttribute('aria-expanded',x.open);},
  'sp-pick'(el){const i=+el.dataset.i,p=ROSTER.find(r=>r.id===el.dataset.id),c=$('#fc'+i);if(!p)return;c.querySelector('[data-f=n]').value=p.name;c.querySelector('[data-f=d]').value=p.dept;},
  'sp-save'(el){const i=+el.dataset.i,s=ST.solo,x=s.speakers[i],c=$('#fc'+i),n=c.querySelector('[data-f=n]').value.trim(),d=c.querySelector('[data-f=d]').value.trim();
    const p=rosterBy(n);x.name=n;x.dept=d||(p?p.dept:'');x.email=p?p.email:'';x.edited=true;x.open=false;
-   c.outerHTML=cardHTML(i);syncSolo();toast(n?'Name saved for this voice':'Name cleared');},
- 'solo-open'(){const s=ST.solo;if(s.rid)ST.reports=ST.reports.filter(r=>r.id!==s.rid);const r=buildRealReport();ST.reports.unshift(r);s.rid=r.id;openReport(r.id);ST.open['r-tx']=true;render();},
+   c.outerHTML=cardHTML(i);syncSolo();toast(n?'Name saved for this voice':'Name cleared');
+   const r=ST.reports.find(x=>x.id===s.rid);if(r){r.speakers=s.speakers.map(({open,...y})=>y);saveReport(r);}},
+ 'solo-open'(){const s=ST.solo;const r=buildRealReport();ST.reports=[r,...ST.reports.filter(x=>x.id!==r.id)];saveReport(r);
+   Object.assign(s,{phase:'idle',t:0,paused:false,introEndMs:0,speakers:[],result:null,title:'',rid:null,err:'',mid:null,parts:null,blob:null});
+   openReport(r.id);ST.open['r-tx']=true;render();},
  'solo-new'(){const s=ST.solo;Object.assign(s,{phase:'idle',t:0,paused:false,introEndMs:0,speakers:[],result:null,title:'',rid:null,err:'',mid:null});render();checkPending();},
  /* ---- group ---- */
  'g-join'(){const g=ST.group;if(!g.live)return;if(!g.joined){g.joined=true;toast('You’re on the invite list. Recording started on your phone.');startGroupSim();}g.phase='meeting';render();window.scrollTo(0,0);},
@@ -578,7 +658,11 @@ const ACT={
    if(!el.dataset.b){sheet(`<h3>Unclear in the audio</h3><p>Soniox was not sure about this word. Keep it, or type the right one.</p><div class="stk"><button class="btnk" data-act="u-pick" data-id="${el.dataset.id}" data-v="${esc(el.dataset.a)}" data-o="">Keep “${esc(el.dataset.a)}”</button><label class="fld"><span>Correct word</span><input id="uFix" value="${esc(el.dataset.a)}" autocomplete="off"></label><button class="btng" data-act="u-fix" data-id="${el.dataset.id}" data-o="${esc(el.dataset.a)}">Use this word</button></div>`);return;}
    sheet(`<h3>Unclear in the audio</h3><p>The recording was not clear at this word. Which one is right?</p><div class="stk"><button class="btnk" data-act="u-pick" data-id="${el.dataset.id}" data-v="${esc(el.dataset.a)}" data-o="${esc(el.dataset.b)}">${esc(el.dataset.a)}</button><button class="btng" data-act="u-pick" data-id="${el.dataset.id}" data-v="${esc(el.dataset.b)}" data-o="${esc(el.dataset.a)}">${esc(el.dataset.b)}</button></div><p style="font-size:13px">Your choice is used everywhere in this report and saved in the change history.</p>`);},
  'u-fix'(el){const v=$('#uFix').value.trim();if(!v)return;const r=curRep();r.res[el.dataset.id]=v;r.hist.push({label:'Unclear word corrected',from:el.dataset.o,to:v,when:hm(new Date())});closeSheet();render();},
- 'rep-dl'(){const r=curRep();if(r?.audio)fetch(r.audio).then(x=>x.blob()).then(b=>saveAudio(b,r.audioName));},
+ 'rep-dl'(){const r=curRep();(r?._blobs||[]).forEach((b,k,a)=>setTimeout(()=>saveAudio(b,a.length>1?r.audioName.replace(/(\.\w+)$/,`_part${k+1}$1`):r.audioName),k*600));},
+ 'rep-txt'(){const r=curRep();if(!r)return;const txt=`${r.title}\n${r.when} · ${r.time} · ${r.dur}\nPeople: ${r.people.map(p=>p.n+(p.d?' ('+p.d+')':'')).join(', ')}\n\n`+r.tx.map((l,i)=>`[${l.t}] ${r.people[l.p]?.n||''}: ${r.ed['t'+i]??plain(r,l.s)}${l.o?'\n        ('+l.o+')':''}`).join('\n\n')+'\n';
+   const b=new Blob([txt],{type:'text/plain;charset=utf-8'});saveAudio(b,r.audioName.replace(/\.\w+$/,'')+'_transcript.txt');},
+ 'rep-del'(){sheet(`<h3>Delete this meeting?</h3><p>The transcript and the recording are removed from this phone. This cannot be undone.</p><div class="stk"><button class="btnr" data-act="rep-del-ok">Delete</button><button class="btng" data-act="close">Keep it</button></div>`);},
+ async 'rep-del-ok'(){closeSheet();const r=curRep();if(!r)return;await deleteReport(r);ST.rep.id=null;render();toast('Meeting deleted from this phone');},
  'u-pick'(el){const r=curRep();r.res[el.dataset.id]=el.dataset.v;r.hist.push({label:'Unclear word checked',from:el.dataset.o?el.dataset.v+' / '+el.dataset.o:el.dataset.v+' (unclear)',to:el.dataset.v,when:hm(new Date())});closeSheet();render();},
  'u-first'(){const u=$('.u[data-act]');if(u)u.click();},
  'rep-dictate'(){
@@ -617,10 +701,13 @@ const FORM={
 
 
 /* ================= sign-in ================= */
-let ME_USER=null;
+let ME_USER=null,HB_FULL=false;
 async function api(path,body){const r=await fetch(API+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const j=await r.json().catch(()=>({}));if(r.status===401&&path!=='/api/login'){showLogin('You were signed out. Please sign in again.');throw new Error(j.error||'Signed out');}if(!r.ok)throw Object.assign(new Error(j.error||('Error '+r.status)),{status:r.status,body:j});return j;}
 async function boot(){
-  try{const r=await fetch(API+'/api/me');if(r.ok){signedIn(await r.json());return;}}catch(e){}
+  try{const r=await fetch(API+'/api/me');const j=await r.json().catch(()=>({}));
+    if(r.ok){signedIn(j);return;}
+    if(r.status===423&&j.user){signedIn({user:j.user});toast(esc(j.error));return;}
+  }catch(e){}
   showLogin();
 }
 function loginHTML(msg){
@@ -642,7 +729,8 @@ function showLogin(msg){
 function signedIn(j){
   ME_USER=j.user;$('#loginScreen').hidden=true;$('#loginScreen').innerHTML='';$('#app').hidden=false;
   $('.me').textContent=j.user.short;$('.me').classList.toggle('adm',j.user.role==='admin');
-  render();loadServer();checkPending();
+  render();loadServer();
+  loadSaved().then(()=>{render();checkPending();});
 }
 async function signOut(){
   if(recording())return toast('End the Solo meeting first');
@@ -666,7 +754,10 @@ async function openAccount(){
 // heartbeat keeps your seat; 3 minutes without it frees the seat for someone else
 setInterval(async()=>{
   if(!ME_USER)return;
-  try{const r=await fetch(API+'/api/me');if(r.status===401){if(recording()){toast('Signed out on the server. Recording continues on this phone; sign in again after ending.');return;}showLogin('You were signed out. Please sign in again.');}}catch(e){}
+  try{const r=await fetch(API+'/api/me');
+    if(r.status===401){if(recording()){toast('Signed out on the server. Recording continues on this phone; sign in again after ending.');return;}showLogin('You were signed out. Your meetings are saved on this phone. Please sign in again.');}
+    if(r.status===423&&!HB_FULL){HB_FULL=true;toast('The demo is full right now. You are still signed in and nothing is lost.');}else if(r.ok)HB_FULL=false;
+  }catch(e){}
 },30000);
 
 /* ================= events ================= */
@@ -697,7 +788,7 @@ document.addEventListener('keydown',e=>{
 });
 /* clocks and "who is speaking" in Group */
 setInterval(()=>{
-  const s=ST.solo; if((s.phase==='intro'||s.phase==='meet')&&!s.paused){s.t++;const e=$('#sTime');if(e&&ST.tab==='solo')e.textContent=mmss(s.t);}
+  const s=ST.solo; if((s.phase==='intro'||s.phase==='meet')&&!s.paused&&recording()){s.t++;const e=$('#sTime');if(e&&ST.tab==='solo')e.textContent=mmss(s.t);}
   const g=ST.group; if(g.live&&!g.paused){g.elapsed++;const a=$('#gTime'),b=$('#gLobbyTime');if(a)a.textContent=mmss(g.elapsed);if(b)b.textContent=mmss(g.elapsed);}
 },1000);
 setInterval(()=>{
