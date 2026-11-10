@@ -56,3 +56,37 @@ test('builds segments, translation and speakers from tokens', () => {
   assert.match(r.segments[2].text, /\{\{\w+\|amlodipine\|\}\}\./);
   assert.equal(r.segments[0].text, "Hi I'm Sara Mendes from Nursing.");
 });
+
+import { parseIntro } from '../server/names.js';
+const P = t => parseIntro(t, DEPARTMENTS);
+
+test('name only', () => {
+  assert.deepEqual(P('Khalid Al-Attiyah.'), { name: 'Khalid Al-Attiyah', role: '', org: '', dept: '' });
+});
+test('name, title and organisation', () => {
+  assert.deepEqual(P('Good morning everyone, my name is Khalid Al-Attiyah, I\'m the finance manager at the Ministry of Public Health.'),
+    { name: 'Khalid Al-Attiyah', role: 'Finance Manager', org: 'Ministry of Public Health', dept: '' });
+});
+test('title with "of" is not an organisation', () => {
+  const r = P("I'm Aisha, director of operations at Sidra Medicine.");
+  assert.equal(r.role, 'Director of Operations'); assert.equal(r.org, 'Sidra Medicine');
+});
+test('organisation without at/from', () => {
+  assert.equal(P('Omar Farouk, legal counsel, Al Tamimi and Company.').org, 'Al Tamimi and Company');
+});
+test('name and department', () => {
+  assert.deepEqual(P('Hi, Layla from the finance department.'), { name: 'Layla', role: '', org: '', dept: 'Finance' });
+});
+test('job title is not repeated as a department', () => {
+  assert.equal(P("I'm Joseph, senior physiotherapist.").dept, '');
+});
+test('Arabic: name, title, organisation', () => {
+  assert.deepEqual(P('أنا خالد العطية، مدير المالية في وزارة الصحة.'), { name: 'خالد العطية', role: 'مدير المالية', org: 'وزارة الصحة', dept: '' });
+});
+test('Arabic: title, department, hospital', () => {
+  assert.deepEqual(P('اسمي مريم، ممرضة في قسم الطوارئ، مستشفى حمد العام.'), { name: 'مريم', role: 'ممرضة', org: 'مستشفى حمد العام', dept: 'قسم الطوارئ' });
+});
+test('normal talk is not an introduction', () => {
+  assert.equal(P('Let us start with room twelve.').name, '');
+  assert.equal(P('Okay, next item is the budget.').name, '');
+});

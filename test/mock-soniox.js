@@ -9,10 +9,10 @@ const files = new Map(), trs = new Map();
 const PORT = process.env.MOCK_PORT || 4010;
 
 const LINES = [
-  ['1', 'en', "Hi, I'm Sara Mendes from Nursing.", 1000],
-  ['2', 'en', 'Josef Tomas, physio.', 4000],
-  ['3', 'ar', 'أنا نورة السليطي من الصيدلة.', 6500, "I'm Noura Al-Sulaiti from pharmacy."],
-  ['4', 'en', 'And I am Layla Hassan from administration.', 9500],
+  ['1', 'en', "Hi, I'm Sara Mendes, head nurse.", 1000],
+  ['2', 'en', 'Josef Tomas.', 4000],
+  ['3', 'ar', 'أنا خالد العطية، مدير المالية في وزارة الصحة.', 6500, "I'm Khalid Al-Attiyah, finance manager at the Ministry of Health."],
+  ['4', 'en', 'Good morning, my name is Layla Hassan, legal counsel at Al Tamimi and Company.', 9500],
   ['1', 'en', 'Mr. Khalid in room 12 fell twice this week, both times at night.', 16000],
   ['2', 'en', "His gait is unsteady. I'd like to start a walker and physiotherapy twice a week.", 21000],
   ['3', 'ar', 'هو ياخذ أملوديبين عشرة ملغ، وممكن يسبب دوخة لما يوقف.', 27000, 'He takes amlodipine 10 mg, which can cause dizziness when he stands up.'],

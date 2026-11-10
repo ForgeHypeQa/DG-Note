@@ -82,7 +82,8 @@ export function buildResult(tokens, { introEndMs = 0, roster, departments, durat
     const heard = intro.map(s => s.origPlain).join(' ').slice(0, 220);
     const english = intro.map(s => s.text.replace(/\{\{\w+\|([^|}]*)\|[^}]*\}\}/g, '$1')).join(' ');
     let id = identify(heard, roster, departments);
-    if (id.how !== 'roster') { const id2 = identify(english, roster, departments); if (id2.how === 'roster' || (id.how === 'none' && id2.how !== 'none')) id = id2; }
+    // The report is in English: for an Arabic introduction, read the name and title from Soniox's English translation.
+    if (id.how !== 'roster') { const id2 = identify(english, roster, departments); if (id2.how === 'roster' || (id2.how !== 'none' && (id.how === 'none' || /[\u0600-\u06FF]/.test(id.name)))) id = id2; }
     const talkMs = mine.reduce((a, s) => a + (s.endMs - s.startMs), 0);
     return { label, index: k + 1, heard, talkMs, ...id };
   });

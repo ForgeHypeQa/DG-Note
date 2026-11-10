@@ -262,6 +262,8 @@ function tableHTML(){
   return `<div class="tbl ${rec?'rec':''} ${s.paused?'paused':''}" id="tbl"><div class="ring"><span>1 m</span></div><div class="ttop"></div><div class="tph"><i></i><i></i><i></i></div>${[0,1,2,3].map(i=>`<div class="seat s${i}" id="seat${i}" style="--c:${C[i]}"></div>`).join('')}</div>`;
 }
 const spName=x=>x.name||('Speaker '+x.index);
+// Whatever the person said about themselves: title, department, organisation (any of them may be missing).
+const spInfo=x=>[x.role,x.dept,x.org].filter(Boolean).join(' · ');
 function cardHTML(i){
   const x=ST.solo.speakers[i],nm=spName(x);
   const tag=x.edited?'Edited':x.how==='roster'?'Staff list':x.how==='heard'?'Check name':'Tap to name';
@@ -269,14 +271,16 @@ function cardHTML(i){
   return `<div class="folder ${x.open?'open':''}" id="fc${i}" style="--c:${x.c}">
     <button class="fhead" data-act="sp-toggle" data-i="${i}" aria-expanded="${!!x.open}">
       <span class="fav">${x.name?ini(x.name):x.index}</span>
-      <span class="grow"><b>${esc(nm)}</b><small>${esc(x.dept||'Department not heard')}</small></span>
+      <span class="grow"><b>${esc(nm)}</b><small dir="auto">${esc(spInfo(x)||(x.name?'Name only':'Name not heard yet'))}</small></span>
       <span class="ftag ${!x.edited&&x.how!=='roster'?'chk':''}">${tag}</span>${I('chev','chev s')}
     </button>
     <div class="fbody"><div class="fin"><div class="fpad">
       <p class="heard">Heard: <span dir="auto">“${esc(x.heard||'…')}”</span></p>
       ${sugg.map(c=>`<button class="sugg" data-act="sp-pick" data-i="${i}" data-id="${esc(c.id)}">Use “${esc(c.name)} · ${esc(c.dept)}” from the staff list</button>`).join('')}
-      <label>Name<input data-f="n" value="${esc(x.name)}" placeholder="Speaker ${x.index}" list="rosterNames" autocomplete="off"></label>
-      <label>Department<input data-f="d" value="${esc(x.dept)}" autocomplete="off"></label>
+      <label>Name<input data-f="n" value="${esc(x.name)}" placeholder="Speaker ${x.index}" list="rosterNames" autocomplete="off" dir="auto"></label>
+      <label>Title or role <i>optional</i><input data-f="r" value="${esc(x.role||'')}" placeholder="e.g. Head Nurse, Finance Manager" autocomplete="off" dir="auto"></label>
+      <label>Department <i>optional</i><input data-f="d" value="${esc(x.dept||'')}" autocomplete="off" dir="auto"></label>
+      <label>Organisation <i>optional</i><input data-f="o" value="${esc(x.org||'')}" placeholder="e.g. Hamad Medical Corporation" autocomplete="off" dir="auto"></label>
       <button class="fsave" data-act="sp-save" data-i="${i}">Save</button>
       <p class="heard" style="font-size:12px">Spoke for about ${durTxt((x.talkMs||0)/1000)}. Same name on two cards joins them in the report.</p>
     </div></div></div><div class="fend"></div></div>`;
@@ -298,7 +302,7 @@ function viewSolo(){
      <button class="cta" data-act="solo-start">${I('mic')}Start meeting</button>
      <p class="fine">First the app announces that the meeting is recorded for digital records.</p>
      <button class="btn2" data-act="solo-file">Test with an audio file</button>
-     ${drawer('solo-how','How Solo works','',`<ol class="steps"><li>The app announces the recording, so everyone at the table knows.</li><li>Each person says their name and department. That voice gets that name.</li><li>Talk as usual in English, Arabic or both. The audio is saved on this phone as you go.</li><li>End the meeting. The recording is sent once, transcribed, and each voice is named.</li></ol>`)}
+     ${drawer('solo-how','How Solo works','',`<ol class="steps"><li>The app announces the recording, so everyone at the table knows.</li><li>Each person introduces themselves: a name, or name with title, department or organisation. That voice gets that name.</li><li>Talk as usual in English, Arabic or both. The audio is saved on this phone as you go.</li><li>End the meeting. The recording is sent once, transcribed, and each voice is named.</li></ol>`)}
      ${drawer('solo-tips','For clear audio','',`<ul class="ticks"><li>${I('check','s')}<span>Put the phone flat in the middle of the table.</span></li><li>${I('check','s')}<span>Everyone sits within 1 metre of it.</span></li><li>${I('check','s')}<span>Keep the screen on. The app stops the screen from locking.</span></li><li>${I('check','s')}<span>One person at a time where possible.</span></li></ul>`)}
      ${rosterDrawer()}`);
   if(s.phase==='proc'){
@@ -324,8 +328,8 @@ function viewSolo(){
   return capsheet(
     `<div class="bar"><span class="recp ${s.paused?'paused':''}" id="sRec"><i></i><b>${s.paused?'PAUSED':'REC'}</b></span><span class="tm" id="sTime">${mmss(s.t)}</span><span class="grow"></span><span class="chipd">${s.phase==='intro'?'Introductions':'Meeting'}</span></div>
      <h1 class="mt">${esc(s.title||'Untitled meeting')}</h1>${tableHTML()}<p class="now" id="sNow"></p>`,
-    `${s.phase==='intro'?`<div class="pcard" style="padding:16px 18px"><b style="font-size:17px">Go around the table</b><p style="color:var(--fg2);margin-top:4px;font-size:15px">Each person says their name and department, one at a time.</p>
-        <div class="exq">“Hi, I’m Sara Mendes from Nursing.”</div><div class="exq" lang="ar" dir="rtl">«أنا نورة السليطي من الصيدلة.»</div></div>
+    `${s.phase==='intro'?`<div class="pcard" style="padding:16px 18px"><b style="font-size:17px">Go around the table</b><p style="color:var(--fg2);margin-top:4px;font-size:15px">Each person introduces themselves, one at a time. A name is enough; title, department or organisation are picked up too.</p>
+        <div class="exq">“Hi, I’m Sara Mendes, head nurse.”</div><div class="exq">“Khalid Al-Attiyah, finance manager, Ministry of Public Health.”</div><div class="exq" lang="ar" dir="rtl">«أنا نورة السليطي من الصيدلة.»</div></div>
       <button class="cta" data-act="solo-begin">Introductions done</button>`
      :`<div class="pcard" style="padding:16px 18px"><b style="font-size:17px">Talk as usual</b><p style="color:var(--fg2);margin-top:4px;font-size:15px">English, Arabic or both. Nothing to read during the meeting. The transcript is written when you end it.</p></div>`}
      <p class="fine" id="sSaved">${savedTxt()}</p>
@@ -347,7 +351,7 @@ function syncSolo(){
 function buildRealReport(){
   const s=ST.solo,res=s.result,people=[],idx={},mapP={};
   s.speakers.forEach(x=>{const n=spName(x).trim(),key=n.toLowerCase();
-    if(!(key in idx)){idx[key]=people.length;people.push({n,d:x.dept||'',e:x.email||rosterBy(n)?.email||'',c:x.c});}
+    if(!(key in idx)){idx[key]=people.length;people.push({n,r:x.role||'',d:x.dept||'',o:x.org||'',e:x.email||rosterBy(n)?.email||'',c:x.c});}
     mapP[x.label]=idx[key];});
   const dms=res.durationMs||(s.t||0)*1000, st=s.startedAt?new Date(s.startedAt):new Date(Date.now()-dms), en=new Date(st.getTime()+dms);
   const old=s.rid&&ST.reports.find(x=>x.id===s.rid);
@@ -534,7 +538,7 @@ function repDetail(r){
   const dec=`<ol class="nlist ${rtl?'rtl':''} ${ST.rep.shim?'shim':''}" ${rtl?'lang="ar"':''}>${r.dec.map((s,i)=>`<li><span ${E('d'+i,'dec')}>${txt('d'+i,s,tr&&tr.dec[i])}</span></li>`).join('')}${added('dec')}</ol>`;
   const act=r.act.map((a,i)=>{const p=who(a.p),t=tr&&tr.act[i];return `<div class="act"><div class="at ${rtl?'rtl':''}" ${rtl?'dir="rtl" lang="ar"':''} ${E('a'+i,'act')}>${txt('a'+i,a.t,t&&t.t)}</div><div class="am"><span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span><span>${esc(t?t.due:a.due)}</span></div></div>`;}).join('');
   const qs=r.qs.map((q,i)=>{const p=who(q.p),t=tr&&tr.qs[i];return `<div class="act"><div class="at" ${rtl&&t?'dir="rtl" lang="ar"':''}>${esc(t||q.t)}</div><div class="am"><span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span><span>Open</span></div></div>`;}).join('');
-  const ppl=`<p class="note" style="margin-bottom:8px">${r.kind==='solo'?'Named from the voice introductions at the start.':'Named from each person’s login on their own phone.'} ${r.status==='sent'?'Emailed '+esc(r.sentAt)+'.':'The report is emailed to everyone listed.'}</p>`+r.people.map(p=>`<div class="prow"><span class="av lg" style="--c:${p.c}">${ini(p.n)}</span><div class="grow"><b>${esc(p.n)}</b><small>${esc(p.d)}</small><small>${p.e?esc(p.e):'No email on file'}</small></div></div>`).join('');
+  const ppl=`<p class="note" style="margin-bottom:8px">${r.kind==='solo'?'Named from the voice introductions at the start.':'Named from each person’s login on their own phone.'} ${r.status==='sent'?'Emailed '+esc(r.sentAt)+'.':'The report is emailed to everyone listed.'}</p>`+r.people.map(p=>`<div class="prow"><span class="av lg" style="--c:${p.c}">${ini(p.n)}</span><div class="grow"><b dir="auto">${esc(p.n)}</b>${[p.r,p.d,p.o].filter(Boolean).length?`<small dir="auto">${esc([p.r,p.d,p.o].filter(Boolean).join(' · '))}</small>`:''}<small>${p.e?esc(p.e):'No email on file'}</small></div></div>`).join('');
   const tx=`<p class="note">${r.real?'Arabic is shown in English, with what was said underneath.':'Clean transcript: grammar fixed and filler words removed.'} ${lang!=='en'?'Shown in English with the original words underneath.':'Orange words were unclear in the audio. Tap one to check it.'}</p>`+r.tx.map((l,i)=>{const p=who(l.p);return `<div class="txl"><div class="th"><span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span><span>${l.t}</span></div><div class="tt" ${E('t'+i,'tx')}>${rt(r,'t'+i,l.s)}</div>${l.o?`<div class="to" lang="ar">${esc(l.o)}</div>`:''}</div>`;}).join('');
   let seed=7;const rnd=()=>{seed=(seed*16807)%2147483647;return seed/2147483647;};
   const bars=r.tx.map(l=>Array.from({length:Math.max(4,Math.round(l.s.length/12))},()=>`<i style="--c:${who(l.p).c};height:${20+Math.round(rnd()*80)}%"></i>`).join('')+'<i style="--c:#D5D2D0;height:8%"></i>').join('');
@@ -591,13 +595,13 @@ const ACT={
  async restart(){closeSheet();if(recording())return toast('End the Solo meeting first');fresh();await loadSaved();render();window.scrollTo(0,0);toast('Sample data reset. Your recorded meetings are kept.');},
  close(){closeSheet();},
  /* ---- solo ---- */
- 'solo-start'(){sheet(`<div class="bigic">${I('speaker')}</div><h3>The app tells everyone first</h3><div class="quote">“This meeting will be recorded for digital records.”</div><p>The phone says it aloud when recording starts, so it is on the record too. Then each person says their name and department.</p><div class="stk"><button class="btnk" data-act="solo-go">Everyone agrees · Start recording</button><button class="btng" data-act="close">Cancel</button></div>`);},
+ 'solo-start'(){sheet(`<div class="bigic">${I('speaker')}</div><h3>The app tells everyone first</h3><div class="quote">“This meeting will be recorded for digital records.”</div><p>The phone says it aloud when recording starts, so it is on the record too. Then each person introduces themselves.</p><div class="stk"><button class="btnk" data-act="solo-go">Everyone agrees · Start recording</button><button class="btng" data-act="close">Cancel</button></div>`);},
  async 'solo-go'(){
    closeSheet();const s=ST.solo;
    try{await recStart();}catch(e){sheet(`<h3>Cannot use the microphone</h3><p>${esc(e.name==='NotAllowedError'?'Microphone access was blocked. Allow the microphone for this site in the browser settings, then try again.':(e.message||String(e)))}</p><div class="stk"><button class="btnk" data-act="close">OK</button></div>`);return;}
    Object.assign(s,{phase:'intro',t:0,paused:false,introEndMs:0,startedAt:Date.now(),speakers:[],result:null,blob:null,rid:null,mid:REC.mid,pending:null});
    render();window.scrollTo(0,0);
-   try{const u=new SpeechSynthesisUtterance('This meeting will be recorded for digital records. Please introduce yourselves with your name and department.');speechSynthesis.cancel();speechSynthesis.speak(u);}catch(e){}
+   try{const u=new SpeechSynthesisUtterance('This meeting will be recorded for digital records. Please go around the table and introduce yourselves.');speechSynthesis.cancel();speechSynthesis.speak(u);}catch(e){}
  },
  'solo-begin'(){const s=ST.solo;s.introEndMs=s.t*1000;DB.patch(REC.mid,{introEndMs:s.introEndMs}).catch(()=>{});s.phase='meet';render();toast('Introductions saved. Talk as usual.');},
  'solo-pause'(){const s=ST.solo;s.paused=!s.paused;try{s.paused?REC.mr.pause():REC.mr.resume();}catch(e){}
@@ -624,8 +628,8 @@ const ACT={
  async 'solo-discard'(){const s=ST.solo;if(!s.pending)return;await DB.remove(s.pending.mid).catch(()=>{});s.pending=null;render();toast('Recording deleted from this phone');},
  'sp-toggle'(el){const i=+el.dataset.i,x=ST.solo.speakers[i];x.open=!x.open;$('#fc'+i).classList.toggle('open',x.open);el.setAttribute('aria-expanded',x.open);},
  'sp-pick'(el){const i=+el.dataset.i,p=ROSTER.find(r=>r.id===el.dataset.id),c=$('#fc'+i);if(!p)return;c.querySelector('[data-f=n]').value=p.name;c.querySelector('[data-f=d]').value=p.dept;},
- 'sp-save'(el){const i=+el.dataset.i,s=ST.solo,x=s.speakers[i],c=$('#fc'+i),n=c.querySelector('[data-f=n]').value.trim(),d=c.querySelector('[data-f=d]').value.trim();
-   const p=rosterBy(n);x.name=n;x.dept=d||(p?p.dept:'');x.email=p?p.email:'';x.edited=true;x.open=false;
+ 'sp-save'(el){const i=+el.dataset.i,s=ST.solo,x=s.speakers[i],c=$('#fc'+i),v=f=>c.querySelector(`[data-f=${f}]`).value.trim(),n=v('n');
+   const p=rosterBy(n);x.name=n;x.role=v('r');x.dept=v('d');x.org=v('o');x.email=p?p.email:'';x.edited=true;x.open=false;
    c.outerHTML=cardHTML(i);syncSolo();toast(n?'Name saved for this voice':'Name cleared');
    const r=ST.reports.find(x=>x.id===s.rid);if(r){r.speakers=s.speakers.map(({open,...y})=>y);saveReport(r);}},
  'solo-open'(){const s=ST.solo;const r=buildRealReport();ST.reports=[r,...ST.reports.filter(x=>x.id!==r.id)];saveReport(r);
@@ -659,7 +663,7 @@ const ACT={
    sheet(`<h3>Unclear in the audio</h3><p>The recording was not clear at this word. Which one is right?</p><div class="stk"><button class="btnk" data-act="u-pick" data-id="${el.dataset.id}" data-v="${esc(el.dataset.a)}" data-o="${esc(el.dataset.b)}">${esc(el.dataset.a)}</button><button class="btng" data-act="u-pick" data-id="${el.dataset.id}" data-v="${esc(el.dataset.b)}" data-o="${esc(el.dataset.a)}">${esc(el.dataset.b)}</button></div><p style="font-size:13px">Your choice is used everywhere in this report and saved in the change history.</p>`);},
  'u-fix'(el){const v=$('#uFix').value.trim();if(!v)return;const r=curRep();r.res[el.dataset.id]=v;r.hist.push({label:'Unclear word corrected',from:el.dataset.o,to:v,when:hm(new Date())});closeSheet();render();},
  'rep-dl'(){const r=curRep();(r?._blobs||[]).forEach((b,k,a)=>setTimeout(()=>saveAudio(b,a.length>1?r.audioName.replace(/(\.\w+)$/,`_part${k+1}$1`):r.audioName),k*600));},
- 'rep-txt'(){const r=curRep();if(!r)return;const txt=`${r.title}\n${r.when} · ${r.time} · ${r.dur}\nPeople: ${r.people.map(p=>p.n+(p.d?' ('+p.d+')':'')).join(', ')}\n\n`+r.tx.map((l,i)=>`[${l.t}] ${r.people[l.p]?.n||''}: ${r.ed['t'+i]??plain(r,l.s)}${l.o?'\n        ('+l.o+')':''}`).join('\n\n')+'\n';
+ 'rep-txt'(){const r=curRep();if(!r)return;const txt=`${r.title}\n${r.when} · ${r.time} · ${r.dur}\nPeople: ${r.people.map(p=>p.n+([p.r,p.d,p.o].filter(Boolean).length?' ('+[p.r,p.d,p.o].filter(Boolean).join(', ')+')':'')).join('; ')}\n\n`+r.tx.map((l,i)=>`[${l.t}] ${r.people[l.p]?.n||''}: ${r.ed['t'+i]??plain(r,l.s)}${l.o?'\n        ('+l.o+')':''}`).join('\n\n')+'\n';
    const b=new Blob([txt],{type:'text/plain;charset=utf-8'});saveAudio(b,r.audioName.replace(/\.\w+$/,'')+'_transcript.txt');},
  'rep-del'(){sheet(`<h3>Delete this meeting?</h3><p>The transcript and the recording are removed from this phone. This cannot be undone.</p><div class="stk"><button class="btnr" data-act="rep-del-ok">Delete</button><button class="btng" data-act="close">Keep it</button></div>`);},
  async 'rep-del-ok'(){closeSheet();const r=curRep();if(!r)return;await deleteReport(r);ST.rep.id=null;render();toast('Meeting deleted from this phone');},

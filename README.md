@@ -24,7 +24,7 @@ The app opens on a sign-in screen. Accounts are fixed in `server/auth.js` (no da
 ## How Solo works
 
 1. **Start meeting.** The phone says "This meeting will be recorded for digital records." Recording starts.
-2. **Introductions.** Each person says their name and department, e.g. "Hi, I'm Sara Mendes from Nursing" or «أنا نورة السليطي من الصيدلة». Tap **Introductions done**.
+2. **Introductions.** Each person introduces themselves in their own way: just a name, or name with title, department or organisation, in English or Arabic, e.g. "Sara Mendes", "Hi, I'm Khalid Al-Attiyah, finance manager at the Ministry of Public Health" or «أنا نورة السليطي من الصيدلة». Tap **Introductions done**.
 3. **Meeting.** Talk as usual. Audio is saved on the phone every 5 seconds (IndexedDB), so a dropped connection or a reload loses nothing.
    - If the phone stops the recording (app sent to the background, screen locked), coming back shows **Continue recording**. If the app was closed, Solo shows **Meeting was interrupted** with **Continue recording**. Each restart is a new part; the server joins the parts into one file (ffmpeg) before transcription.
 4. **End meeting.** The whole recording is uploaded once. The server sends it to Soniox (async, with speaker separation, language detection and English translation).

@@ -80,42 +80,146 @@ export function findDepartment(text, departments) {
   return best ? best.dept : '';
 }
 
-const EN_TRIGGER = /\b(?:my name is|my name's|i am|i'm|im|this is|it's|it is|here is)\s+(?:dr\.?\s+|doctor\s+)?(.+)/i;
-const EN_STOP = /^(from|in|with|and|of|at|i|i'm|working|work|the|department|team|unit|here|speaking|nurse|physio)$/i;
-const AR_TRIGGER = /(?:انا|أنا|اسمي|معكم|معك|هنا)\s+(?:د\.?\s+|دكتور\s+|دكتوره\s+|الدكتور\s+)?(.+)/;
-const AR_STOP = /^(من|في|مع|و|قسم|الصيدلة|التمريض)$/;
+/* ---------- reading an introduction ----------
+   People introduce themselves in any shape:
+     "Sara Mendes."                                   name only
+     "I'm Joseph, senior physiotherapist."            name + title
+     "Rami Haddad, care coordinator at Hamad Medical"  name + title + organisation
+     "Hi, Layla from the finance department"           name + department
+     «أنا خالد العطية، مدير المالية في وزارة الصحة»    Arabic, name + title + organisation
+   parseIntro() picks out whichever of name, title (role), organisation and department were said. */
 
-function cleanWord(w) { return w.replace(/[.,;:!?،؛"“”()]/g, ''); }
+const GREETING = /^(?:\s*(?:hi|hello|hey|hiya|good\s+(?:morning|afternoon|evening)|morning|salam|salaam|assalamu?\s*alaikum|as-?salamu\s*alaykum|everyone|all|guys|team|مرحبا|مرحباً|السلام عليكم|صباح الخير|مساء الخير|أهلا|اهلا)[\s,!.،]*)+/i;
+const EN_TRIGGER = /\b(?:my\s+name\s+is|my\s+name's|i\s+am|i'm|im|this\s+is|it's|it\s+is|here\s+is|call\s+me)\s+(.+)/i;
+const AR_TRIGGER = /(?:^|\s)(?:انا|أنا|اسمي|معكم|معك|هنا)\s+(.+)/;
+const TITLE_EN = /^(?:dr\.?|doctor|mr\.?|mrs\.?|ms\.?|miss|eng\.?|engineer|prof\.?|professor|sheikh|sheikha)$/i;
+const TITLE_AR = /^(?:د\.?|دكتور|دكتورة|الدكتور|الدكتورة|م\.?|المهندس|المهندسة|مهندس|الأستاذ|الأستاذة|أستاذ|أستاذة|الشيخ|الشيخة)$/;
 
-// Pulls a name out of an introduction sentence when nobody in the staff list matched.
-export function extractSpokenName(text) {
-  const src = String(text || '').replace(/\s+/g, ' ').trim();
-  let m = src.match(EN_TRIGGER), stop = EN_STOP;
-  if (!m) { m = src.match(AR_TRIGGER); stop = AR_STOP; }
-  if (!m) return '';
-  const out = [];
-  for (const raw of m[1].split(' ')) {
-    const w = cleanWord(raw);
-    if (!w || stop.test(w)) break;
-    out.push(w);
-    if (/[.,،;!?]$/.test(raw) || out.length === 3) break;
+const ROLE_WORDS = ['nurse','doctor','physician','consultant','specialist','resident','surgeon','pharmacist','physiotherapist','physio','therapist','dietitian','dietician','nutritionist','social worker','worker','coordinator','manager','director','head','chief','officer','supervisor','administrator','admin','secretary','assistant','lawyer','counsel','advocate','attorney','paralegal','engineer','analyst','accountant','ceo','cfo','coo','cto','chairman','chairwoman','chair','president','vice president','partner','associate','intern','trainee','advisor','adviser','executive','representative','lead','auditor','inspector','clerk','receptionist','caregiver','carer','midwife','psychologist','psychiatrist','pharmacy technician','technician'];
+const ROLE_MOD = ['senior','junior','head','chief','lead','deputy','assistant','associate','general','executive','clinical','charge','staff','principal','managing','acting','registered','legal','medical','nursing','senior staff'];
+const ORG_WORDS = /\b(hospital|medical|health|healthcare|clinic|centre|center|corporation|corp|company|co|group|ministry|university|college|school|council|authority|bank|firm|llc|wll|ltd|foundation|institute|association|agency|chambers|partners|holding|holdings|enterprises|services|solutions|consultancy|consulting|hamad|sidra|aspetar|phcc|qatarenergy|ooredoo|qatar\s+airways|qnb|forgehype)\b/i;
+const AR_ORG = /(?:^|\s)((?:وزارة|مستشفى|مستشفي|مؤسسة|شركة|مركز|جامعة|مجلس|هيئة|بنك|مصرف|مكتب|عيادة|معهد|جمعية|مجموعة)(?:\s+(?!و\s|في\s|من\s)[^\s،,.]+){1,4})/;
+const AR_NOT = '(?!(?:في|من|مع|و|قسم)(?:\\s|$))(?!(?:وزارة|مستشفى|مؤسسة|شركة|مركز|جامعة|مجلس|هيئة|بنك))';
+const AR_ROLE = new RegExp(`(?:^|\\s)((?:ال)?(?:مدير|رئيس|نائب|منسق|مشرف|أخصائي|اخصائي|ممرض|طبيب|استشاري|صيدلي|صيدلاني|محامي|مستشار|مهندس|موظف|سكرتير|محاسب|باحث)[ةه]?(?:\\s+${AR_NOT}[^\\s،,.]+){0,2})`);
+const AR_DEPT = new RegExp(`(?:^|\\s)قسم\\s+([^\\s،,.]+(?:\\s+${AR_NOT}[^\\s،,.]+)?)`);
+const NOT_NAME = new Set(['let','lets','let\'s','we','so','okay','ok','yes','no','the','this','that','today','first','next','good','thank','thanks','please','can','could','should','will','what','how','when','our','us','he','she','they','it','there','now','right','alright','well','then','also','and','but','because','if','as','about','regarding','agenda','meeting','item','moving','start','starting','welcome','hi','hello','yeah','sure']);
+const EN_STOP = new Set(['from','in','with','and','of','at','i','i\'m','im','working','work','works','the','a','an','department','dept','team','unit','here','speaking','representing','for','on','as','my','our','today','also','just','who','which','role','position','title','is','am','currently']);
+const AR_STOP = new Set(['من','في','مع','و','قسم','وأنا','وانا','أعمل','اعمل','بصفتي','كـ']);
+
+const roleRe = (() => {
+  const esc = w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+  const mods = ROLE_MOD.map(esc).join('|'), roles = ROLE_WORDS.sort((a, b) => b.length - a.length).map(esc).join('|');
+  // optional "finance"/"HR" word before manager-type roles, modifiers, the role, optional "of X"/"for X"
+  return new RegExp(`\\b((?:(?!(?:from|at|with|in|of|the|and|i|am|i'm|my|is|a|an)\\b)[A-Za-z&]+\\s+(?=(?:manager|director|coordinator|officer|lead|specialist|supervisor|administrator|analyst|engineer|executive|assistant)\\b))?(?:(?:${mods})\\s+)*(?:${roles})(?:\\s+(?:of|for)\\s+(?:the\\s+)?[A-Za-z&]+(?:\\s+(?!at\\b|from\\b|with\\b|in\\b|and\\b)[A-Za-z&]+)?)?)\\b`, 'i');
+})();
+const cap = w => w ? w.replace(/(^|[\s-])([a-z])/g, (m, a, b) => a + b.toUpperCase()) : w;
+const isLatin = s => /[A-Za-z]/.test(s) && !/[؀-ۿ]/.test(s);
+function cleanWord(w) { return w.replace(/[.,;:!?،؛"“”«»()]/g, ''); }
+
+function nameFrom(text) {
+  const src = String(text || '').replace(/\s+/g, ' ').trim().replace(GREETING, '').trim();
+  let m = src.match(EN_TRIGGER), ar = false;
+  if (!m) { m = src.match(AR_TRIGGER); ar = !!m; }
+  let rest = m ? m[1] : src, latin = isLatin(rest.split(/\s+/)[0] || '');
+  if (!m && !ar && /[؀-ۿ]/.test(rest.split(/\s+/)[0] || '')) ar = true;
+  const words = rest.split(' '), out = [];
+  let title = '', cleanEnd = false;
+  for (let k = 0; k < words.length; k++) {
+    const raw = words[k], w = cleanWord(raw);
+    if (!w) break;
+    if (!out.length && (TITLE_EN.test(w) || TITLE_AR.test(w))) { title = /^(dr|doctor|د|دكتور|دكتورة|الدكتور|الدكتورة)/i.test(w) ? 'Dr.' : ''; continue; }
+    const lw = w.toLowerCase();
+    if (ar ? AR_STOP.has(w) || AR_ROLE.test(' ' + w) || /^(?:وزارة|مستشفى|مؤسسة|شركة|مركز|جامعة|مجلس|هيئة|بنك)$/.test(w) : EN_STOP.has(lw) || roleRe.test(w) || ORG_WORDS.test(w)) { cleanEnd = true; break; }
+    // Without "I'm"/"my name is", only accept a name made of capitalised words (Al-/bin/bint allowed).
+    if (!m && !ar && (NOT_NAME.has(lw) || (!/^[A-Z]/.test(w) && !/^(al|el|bin|bint|ibn|abu|van|de|da|del)$/i.test(w)))) break;
+    out.push(latin && !ar && /^[a-z]/.test(w) && !/^(al|el|bin|bint|ibn|abu)$/i.test(w) ? cap(w) : w);
+    if (/[.,،;!?]$/.test(raw) || k === words.length - 1) { cleanEnd = true; break; }
+    if (out.length === 4) break;
   }
-  return out.map(w => /^[a-z]/.test(w) ? w[0].toUpperCase() + w.slice(1) : w).join(' ');
+  if (!out.length) return { name: '', dr: title === 'Dr.' };
+  // "Let us start…" is not an introduction: without "I'm"/"my name is" the name must end cleanly
+  // (comma, full stop, end, or words like "from", "here", a job title).
+  if (!m && !cleanEnd) return { name: '', dr: false };
+  return { name: (title ? title + ' ' : '') + out.join(' '), dr: title === 'Dr.' };
 }
+
+function roleFrom(text, name) {
+  const t = String(text || '').replace(GREETING, '');
+  const afterName = name && t.toLowerCase().includes(name.toLowerCase().replace(/^dr\.\s*/, '')) ? t.slice(t.toLowerCase().indexOf(name.toLowerCase().replace(/^dr\.\s*/, '')) + name.replace(/^dr\.\s*/i, '').length) : t;
+  const ar = afterName.match(AR_ROLE);
+  if (ar) return ar[1].trim();
+  const m = afterName.match(roleRe);
+  if (!m) return '';
+  let r = m[1].replace(/\s+/g, ' ').trim();
+  if (/^(head|chief|lead)$/i.test(r)) return '';        // "head" alone is too vague
+  return r.length > 2 && r.toUpperCase() === r ? r : cap(r.toLowerCase()).replace(/\b(Of|For|The|And)\b/g, s => s.toLowerCase()).replace(/\b(Ceo|Cfo|Coo|Cto|Hr|It)\b/g, s => s.toUpperCase());
+}
+
+function orgFrom(text, departments, role) {
+  let t = String(text || '');
+  const ar = t.match(AR_ORG); if (ar) return ar[1].trim();
+  if (role) t = t.replace(new RegExp(role.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), ' ');   // "director of operations" is a title, not an organisation
+  const tidy = phrase => phrase.split(/\s+/).map(w => /^[a-z]/.test(w) && !/^(of|and|for|the|al)$/.test(w) ? cap(w) : w).join(' ');
+  for (const preps of ['from|at|with|representing', 'of|for']) {
+  const re = new RegExp(`\\b(?:${preps})\\s+((?:the\\s+)?[A-Za-z][A-Za-z&'.-]*(?:\\s+(?!and\\b(?!\\s+(?:company|co|partners|sons|associates)\\b)|i\\b|i'm\\b|in\\b|as\\b|at\\b|from\\b|with\\b|department\\b|team\\b|unit\\b)[A-Za-z][A-Za-z&'.-]*){0,5})`, 'gi');
+  let m;
+  while ((m = re.exec(t))) {
+    let phrase = m[1].replace(/^the\s+/i, '').split(/(?<=[a-z]{3}\.)\s/)[0].replace(/[.,;]+$/, '').trim();   // stop at the end of the sentence
+    phrase = phrase.split(/\s+(?=(?:as|where|in)\b|and\b(?!\s+(?:company|co|partners|sons|associates)\b))/i)[0];
+    if (!phrase || findDepartment(phrase, departments) && !ORG_WORDS.test(phrase)) continue;   // that's a department
+    if (/\b(department|dept|team|unit|division|section)\b/i.test(phrase)) continue;
+    if (roleRe.test(phrase) && !ORG_WORDS.test(phrase)) continue;
+    const capsWords = phrase.split(/\s+/).filter(w => /^[A-Z]/.test(w)).length;
+    if (ORG_WORDS.test(phrase) || capsWords >= 1) return tidy(phrase);
+  }
+  }
+  // A comma-separated part that names an organisation: "…, legal counsel, Al Tamimi and Company."
+  for (const seg of t.split(/[,;]/).slice(1)) {
+    const p = seg.replace(/[.!]+$/, '').trim();
+    if (p && ORG_WORDS.test(p) && !roleRe.test(p) && p.split(/\s+/).length <= 6) return tidy(p);
+  }
+  return '';
+}
+
+function deptFrom(text, departments, role) {
+  const t = String(text || '');
+  const ar = t.match(AR_DEPT); if (ar) return findDepartment(ar[1], departments) || 'قسم ' + ar[1].trim();
+  const ex = t.match(/\b(?:the\s+)?([A-Za-z&]+(?:\s+(?!the\b)[A-Za-z&]+)?)\s+(?:department|dept\.?|team|unit|division|section)\b/i);
+  if (ex && !/^(the|our|my|a)$/i.test(ex[1])) { const k = findDepartment(ex[1], departments); if (k) return k; }
+  // dictionary words, but not the ones inside the job title ("senior physiotherapist" is a title, not a department)
+  const known = findDepartment(role ? t.replace(role, ' ').replace(new RegExp(role, 'i'), ' ') : t, departments);
+  if (known) return known;
+  let m = t.match(/\b(?:the\s+)?([A-Za-z&]+(?:\s+(?!the\b)[A-Za-z&]+)?)\s+(?:department|dept\.?|team|unit|division|section)\b/i);
+  if (m && !/^(the|our|my|a)$/i.test(m[1])) return cap(m[1].replace(/^(the|our|my)\s+/i, '').toLowerCase()).replace(/\b(Hr|It|Icu|Er)\b/g, s => s.toUpperCase());
+  m = t.match(/\b(?:department|division)\s+of\s+([A-Za-z&]+(?:\s+[A-Za-z&]+)?)/i);
+  if (m) return cap(m[1].toLowerCase());
+  return '';
+}
+
+export function parseIntro(text, departments = {}) {
+  const { name, dr } = nameFrom(text);
+  let role = roleFrom(text, name), dept = deptFrom(text, departments, role), org = orgFrom(text, departments, role);
+  if (!role && dr) role = 'Doctor';
+  if (role && dept && role.toLowerCase().includes(dept.toLowerCase()) && !/\b(of|for)\b/i.test(role) && role.split(' ').length > 1) {/* e.g. "Pharmacy manager": keep both */}
+  if (org && dept && org.toLowerCase() === dept.toLowerCase()) org = '';
+  return { name, role, org, dept };
+}
+
+// Kept for older callers and tests.
+export const extractSpokenName = text => nameFrom(text).name;
 
 export const MATCH_MIN = 0.78;
 
-// Returns { name, dept, email, how, score, candidates }.
+// Returns { name, role, org, dept, email, how, score, candidates }.
 // how: 'roster' (matched staff list), 'heard' (name taken from the sentence), 'none'.
 export function identify(introText, roster, departments) {
   const ranked = matchRoster(introText, roster);
-  const spokenDept = findDepartment(introText, departments);
+  const said = parseIntro(introText, departments);
   const top = ranked[0];
-  const candidates = ranked.filter(r => r.score >= 0.5).slice(0, 3).map(r => ({ id: r.person.id, name: r.person.name, dept: r.person.dept, email: r.person.email, score: +r.score.toFixed(2) }));
+  const candidates = ranked.filter(r => r.score >= 0.65).slice(0, 3).map(r => ({ id: r.person.id, name: r.person.name, dept: r.person.dept, email: r.person.email, score: +r.score.toFixed(2) }));
   if (top && top.score >= MATCH_MIN) {
-    return { name: top.person.name, dept: spokenDept || top.person.dept, email: top.person.email, how: 'roster', score: +top.score.toFixed(2), candidates };
+    return { name: top.person.name, role: said.role, org: said.org, dept: said.dept || top.person.dept, email: top.person.email, how: 'roster', score: +top.score.toFixed(2), candidates };
   }
-  const spoken = extractSpokenName(introText);
-  if (spoken) return { name: spoken, dept: spokenDept, email: '', how: 'heard', score: 0, candidates };
-  return { name: '', dept: spokenDept, email: '', how: 'none', score: 0, candidates };
+  if (said.name) return { ...said, email: '', how: 'heard', score: 0, candidates };
+  return { ...said, name: '', email: '', how: 'none', score: 0, candidates };
 }
