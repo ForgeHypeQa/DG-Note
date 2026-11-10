@@ -12,7 +12,7 @@ export const MAX_ONLINE = Number(process.env.MAX_ONLINE || 4);
 const IDLE_MS = 3 * 60 * 1000;               // app closed this long = seat freed (still signed in)
 const SESSION_MS = 7 * 24 * 60 * 60 * 1000;  // stay signed in for 7 days
 const COOKIE = 'dg_t';
-// Signing key: SESSION_SECRET if set, else derived from the Soniox key (stable across restarts).
+// Signing key: SESSION_SECRET if set, else derived from the engine key (stable across restarts).
 const SECRET = process.env.SESSION_SECRET
   || (process.env.SONIOX_API_KEY ? createHash('sha256').update('dg-note-session|' + process.env.SONIOX_API_KEY).digest('hex') : randomBytes(32).toString('hex'));
 

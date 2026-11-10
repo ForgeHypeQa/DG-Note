@@ -111,7 +111,7 @@ function procView(title,sub,steps,pi,openAct,backAct,backLabel){
 function runProc(scope,n,done){scope.pi=0;const step=()=>{scope.pi++;if(scope.pi>=n)done();render();if(scope.pi<n)T(step,900);};T(step,900);}
 
 /* ================= SOLO · real recording ================= */
-// Flow: record on this phone (saved every 10 s) → end → upload once → Soniox async
+// Flow: record on this phone (saved every 5 s) → end → upload once → ForgeHype Meet transcription
 // (speakers + Arabic/English + translation) → names from the introductions → review → report.
 const API = location.protocol.startsWith('http') ? '' : 'http://localhost:3000';
 let ROSTER = Object.keys(DIR).map(k=>({id:k,name:DIR[k].n,dept:DIR[k].d,email:DIR[k].e}));
@@ -208,7 +208,7 @@ document.addEventListener('visibilitychange',()=>{
 });
 
 /* --- processing --- */
-const STEPS=[['save','Saving the recording on this phone'],['upload','Sending it to the server'],['queued','Waiting for Soniox'],['processing','Transcribing Arabic and English'],['naming','Naming speakers from the introductions']];
+const STEPS=[['save','Saving the recording on this phone'],['upload','Sending it to the server'],['queued','Waiting in the queue'],['processing','Transcribing Arabic and English'],['naming','Naming speakers from the introductions']];
 const stepIx=st=>st==='completed'?4:st==='done'?5:Math.max(0,STEPS.findIndex(x=>x[0]===st));
 function upload(url,blob,onp,headers){return new Promise((res,rej)=>{const x=new XMLHttpRequest();x.open('POST',url);x.setRequestHeader('Content-Type',(blob.type||'audio/webm').split(';')[0]);
   for(const [k,v] of Object.entries(headers||{}))x.setRequestHeader(k,v);
@@ -225,7 +225,7 @@ async function processMeeting(mid,fileBlob){
     const blob=parts.length>1?new Blob(parts,{type:parts[0].type}):parts[0];
     if(!HEALTH||HEALTH.offline)await loadServer();
     if(HEALTH?.offline)throw new Error('Cannot reach the DG-Note server. Your recording is safe on this phone. Try again when you are online.');
-    if(!HEALTH.soniox)throw new Error('The server has no Soniox key yet. Add SONIOX_API_KEY to the .env file and restart the server.');
+    if(!HEALTH.engine)throw new Error('Transcription is not switched on for this server yet. Ask the admin. Your recording is safe on this phone.');
     s.step='upload';render();
     const q=new URLSearchParams({title:s.title||'',introEndMs:String(Math.round(s.introEndMs||0)),durationMs:String(Math.round((s.t||0)*1000))});
     const job=await upload(API+'/api/solo/jobs?'+q,blob,p=>{s.upPct=p;const e=$('#upPct');if(e)e.textContent=Math.round(p*100)+'%';},parts.length>1?{'X-Parts':parts.map(b=>b.size).join(',')}:{});
@@ -289,7 +289,7 @@ const rosterDrawer=()=>drawer('solo-names','Names for testing',ROSTER.length,`<p
 function serverNote(){
   if(!HEALTH)return '';
   if(HEALTH.offline)return `<div class="warnbox">Cannot reach the DG-Note server. You can still record. The recording stays on this phone until it can be sent.</div>`;
-  if(!HEALTH.soniox)return `<div class="warnbox">The server is running but has no Soniox key. Add SONIOX_API_KEY to .env and restart.</div>`;
+  if(!HEALTH.engine)return `<div class="warnbox">Transcription is not switched on for this server yet. You can still record; ask the admin to switch it on.</div>`;
   return '';
 }
 function viewSolo(){
@@ -543,7 +543,7 @@ function repDetail(r){
     <h1 class="mt">${esc(r.title)}</h1>
     <p class="meta">${r.when} · ${r.time} · ${r.dur}<br>Called by ${esc(r.by)}</p>
     <div class="sumh">${L.sum}</div>
-    ${r.real&&!r.sum.length&&!r.add.sum.length?`<p class="sub" style="max-width:none">Real transcript from Soniox${r.langs&&r.langs.length?' · heard '+r.langs.map(l=>({en:'English',ar:'Arabic'}[l]||l)).join(' and '):''}. The AI summary, decisions and actions are the next build step.</p>`:''}
+    ${r.real&&!r.sum.length&&!r.add.sum.length?`<p class="sub" style="max-width:none">Transcribed by ForgeHype Meet${r.langs&&r.langs.length?' · heard '+r.langs.map(l=>({en:'English',ar:'Arabic'}[l]||l)).join(' and '):''}. The AI summary, decisions and actions are the next build step.</p>`:''}
     <ul class="sum ${rtl?'rtl':''} ${ST.rep.shim?'shim':''}" ${rtl?'lang="ar"':''}>${r.sum.map((s,i)=>`<li><span ${E('s'+i,'sum')}>${txt('s'+i,s,tr&&tr.sum[i])}</span></li>`).join('')}${added('sum')}</ul>
     <div class="rchips">${n&&lang==='en'?`<button class="rchip u1" data-act="u-first">${n} unclear word${n>1?'s':''} · tap the orange text</button>`:''}${r.hist.length?`<span class="rchip">${r.hist.length} change${r.hist.length>1?'s':''} · originals kept</span>`:''}</div>`;
   const dec=`<ol class="nlist ${rtl?'rtl':''} ${ST.rep.shim?'shim':''}" ${rtl?'lang="ar"':''}>${r.dec.map((s,i)=>`<li><span ${E('d'+i,'dec')}>${txt('d'+i,s,tr&&tr.dec[i])}</span></li>`).join('')}${added('dec')}</ol>`;
@@ -553,7 +553,7 @@ function repDetail(r){
   const tx=`<p class="note">${r.real?'Arabic is shown in English, with what was said underneath.':'Clean transcript: grammar fixed and filler words removed.'} ${lang!=='en'?'Shown in English with the original words underneath.':'Orange words were unclear in the audio. Tap one to check it.'}</p>`+r.tx.map((l,i)=>{const p=who(l.p);return `<div class="txl"><div class="th">${r.real?`<button class="sp" style="--c:${p.c}" data-act="rep-person" data-p="${l.p}" aria-label="Rename ${esc(p.n)}">${esc(first(p.n))}</button>`:`<span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span>`}<span>${l.t}</span></div><div class="tt" ${E('t'+i,'tx')}>${rt(r,'t'+i,l.s)}</div>${l.o?`<div class="to" lang="ar">${esc(l.o)}</div>`:''}</div>`;}).join('');
   let seed=7;const rnd=()=>{seed=(seed*16807)%2147483647;return seed/2147483647;};
   const bars=r.tx.map(l=>Array.from({length:Math.max(4,Math.round(l.s.length/12))},()=>`<i style="--c:${who(l.p).c};height:${20+Math.round(rnd()*80)}%"></i>`).join('')+'<i style="--c:#D5D2D0;height:8%"></i>').join('');
-  const rec=r.real?((r.audios||[]).length?(r.audios.length>1?`<p class="note" style="margin-bottom:8px">Recorded in ${r.audios.length} parts because the phone paused the recording. The transcript covers all parts.</p>`:'')+r.audios.map((u,k)=>`${r.audios.length>1?`<b style="display:block;font-size:13px;margin:8px 0 4px">Part ${k+1}</b>`:''}<audio class="aud" controls preload="metadata" src="${u}"></audio>`).join('')+`<button class="btn2" style="margin-top:10px" data-act="rep-dl">Save the audio file${r.audios.length>1?'s':''}</button><button class="btn2" style="margin-top:8px" data-act="rep-txt">Save the transcript (.txt)</button><button class="btn2 danger" style="margin-top:8px" data-act="rep-del">Delete this meeting from the phone</button><p class="fine" style="text-align:start;margin-top:8px">Saved on this phone. The server and Soniox delete their copy after transcription.</p>`:'<p class="note">The audio stays on the phone that recorded it.</p>'):`<div style="display:flex;gap:12px;align-items:center"><button class="playb" data-act="rep-play" aria-label="Play recording">${I(ST.rep.play?'pause':'play')}</button><div class="grow"><b style="font-size:15px">${esc(r.title.replace(/[^A-Za-z0-9]+/g,'_'))}.mp3</b><div style="font-size:13px;color:var(--fg2)">${r.dur} · ${r.people.length} speakers · kept for 30 days</div></div></div><div class="wavebars" id="wave">${bars}</div><p class="fine" style="text-align:start;margin-top:8px">Colours show who is speaking. Playback is simulated in this prototype.</p>`;
+  const rec=r.real?((r.audios||[]).length?(r.audios.length>1?`<p class="note" style="margin-bottom:8px">Recorded in ${r.audios.length} parts because the phone paused the recording. The transcript covers all parts.</p>`:'')+r.audios.map((u,k)=>`${r.audios.length>1?`<b style="display:block;font-size:13px;margin:8px 0 4px">Part ${k+1}</b>`:''}<audio class="aud" controls preload="metadata" src="${u}"></audio>`).join('')+`<button class="btn2" style="margin-top:10px" data-act="rep-dl">Save the audio file${r.audios.length>1?'s':''}</button><button class="btn2" style="margin-top:8px" data-act="rep-txt">Save the transcript (.txt)</button><button class="btn2 danger" style="margin-top:8px" data-act="rep-del">Delete this meeting from the phone</button><p class="fine" style="text-align:start;margin-top:8px">Saved on this phone. The ForgeHype Meet server deletes its copy after transcription.</p>`:'<p class="note">The audio stays on the phone that recorded it.</p>'):`<div style="display:flex;gap:12px;align-items:center"><button class="playb" data-act="rep-play" aria-label="Play recording">${I(ST.rep.play?'pause':'play')}</button><div class="grow"><b style="font-size:15px">${esc(r.title.replace(/[^A-Za-z0-9]+/g,'_'))}.mp3</b><div style="font-size:13px;color:var(--fg2)">${r.dur} · ${r.people.length} speakers · kept for 30 days</div></div></div><div class="wavebars" id="wave">${bars}</div><p class="fine" style="text-align:start;margin-top:8px">Colours show who is speaking. Playback is simulated in this prototype.</p>`;
   const hist=r.hist.slice().reverse().map(h=>`<div class="hrow2"><small>${esc(h.label)} · ${h.when}</small><s>${esc(h.from)}</s><div>${esc(h.to)}</div></div>`).join('');
   const dock=ed&&r.real?`<button class="dbt k" data-act="rep-edit">Done</button>`:ed?`<button class="dbt" data-act="rep-dictate" ${ST.rep.dictating?'disabled':''}>${I('mic','s')}${ST.rep.dictating?'Listening…':'Dictate'}</button><button class="dbt k" data-act="rep-edit">Done</button>`
     :r.status==='sent'?`<span class="sentl">${I('check','s')}${r.real?'Approved':'Sent to '+r.people.filter(p=>p.e).length+' people'}</span><button class="dbt ic" data-act="rep-copy" aria-label="Copy summary">${I('copy','s')}</button>`
@@ -671,7 +671,7 @@ const ACT={
  'rep-setlang'(el){ST.rep.lang=el.dataset.l;ST.rep.edit=false;ST.rep.shim=true;closeSheet();render();if(ST.rep.lang!=='en')toast('Translated to '+LANG[ST.rep.lang].name);},
  'rep-en'(){ST.rep.lang='en';ST.rep.shim=true;render();},
  'u-open'(el){if(ST.rep.edit)return;
-   if(!el.dataset.b){sheet(`<h3>Unclear in the audio</h3><p>Soniox was not sure about this word. Keep it, or type the right one.</p><div class="stk"><button class="btnk" data-act="u-pick" data-id="${el.dataset.id}" data-v="${esc(el.dataset.a)}" data-o="">Keep “${esc(el.dataset.a)}”</button><label class="fld"><span>Correct word</span><input id="uFix" value="${esc(el.dataset.a)}" autocomplete="off"></label><button class="btng" data-act="u-fix" data-id="${el.dataset.id}" data-o="${esc(el.dataset.a)}">Use this word</button></div>`);return;}
+   if(!el.dataset.b){sheet(`<h3>Unclear in the audio</h3><p>ForgeHype Meet was not sure about this word. Keep it, or type the right one.</p><div class="stk"><button class="btnk" data-act="u-pick" data-id="${el.dataset.id}" data-v="${esc(el.dataset.a)}" data-o="">Keep “${esc(el.dataset.a)}”</button><label class="fld"><span>Correct word</span><input id="uFix" value="${esc(el.dataset.a)}" autocomplete="off"></label><button class="btng" data-act="u-fix" data-id="${el.dataset.id}" data-o="${esc(el.dataset.a)}">Use this word</button></div>`);return;}
    sheet(`<h3>Unclear in the audio</h3><p>The recording was not clear at this word. Which one is right?</p><div class="stk"><button class="btnk" data-act="u-pick" data-id="${el.dataset.id}" data-v="${esc(el.dataset.a)}" data-o="${esc(el.dataset.b)}">${esc(el.dataset.a)}</button><button class="btng" data-act="u-pick" data-id="${el.dataset.id}" data-v="${esc(el.dataset.b)}" data-o="${esc(el.dataset.a)}">${esc(el.dataset.b)}</button></div><p style="font-size:13px">Your choice is used everywhere in this report and saved in the change history.</p>`);},
  'u-fix'(el){const v=$('#uFix').value.trim();if(!v)return;const r=curRep();r.res[el.dataset.id]=v;r.hist.push({label:'Unclear word corrected',from:el.dataset.o,to:v,when:hm(new Date())});closeSheet();render();},
  'rep-dl'(){const r=curRep();(r?._blobs||[]).forEach((b,k,a)=>setTimeout(()=>saveAudio(b,a.length>1?r.audioName.replace(/(\.\w+)$/,`_part${k+1}$1`):r.audioName),k*600));},

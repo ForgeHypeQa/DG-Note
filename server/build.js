@@ -1,4 +1,4 @@
-// Turns Soniox tokens into speaker segments, English text and named speakers.
+// Turns speech-engine tokens into speaker segments, English text and named speakers.
 import { identify } from './names.js';
 
 export const UNSURE_BELOW = 0.6; // word confidence under this is shown in orange
@@ -58,7 +58,7 @@ export function buildResult(tokens, { introEndMs = 0, roster, departments, durat
       const origPlain = words.map(w => w.text).join(' ').replace(/\s+([.,!?;:،؟])/g, '$1');
       const en = p.en.join('').replace(/\s+/g, ' ').trim();
       // English speech: show the original with unclear words marked.
-      // Other languages: show Soniox's English translation, keep the original underneath.
+      // Other languages: show the engine's English translation, keep the original underneath.
       if (lang === 'en' || !en) return { text: markWords(words, `s${i}w${p.startMs}_`), orig: lang === 'en' ? '' : origPlain, lang, origPlain };
       return { text: en, orig: origPlain, lang, origPlain };
     });
@@ -82,7 +82,7 @@ export function buildResult(tokens, { introEndMs = 0, roster, departments, durat
     const heard = intro.map(s => s.origPlain).join(' ').slice(0, 220);
     const english = intro.map(s => s.text.replace(/\{\{\w+\|([^|}]*)\|[^}]*\}\}/g, '$1')).join(' ');
     let id = identify(heard, roster, departments);
-    // The report is in English: for an Arabic introduction, read the name and title from Soniox's English translation.
+    // The report is in English: for an Arabic introduction, read the name and title from the engine's English translation.
     if (id.how !== 'roster') { const id2 = identify(english, roster, departments); if (id2.how === 'roster' || (id2.how !== 'none' && (id.how === 'none' || /[\u0600-\u06FF]/.test(id.name)))) id = id2; }
     const talkMs = mine.reduce((a, s) => a + (s.endMs - s.startMs), 0);
     return { label, index: k + 1, heard, talkMs, ...id };

@@ -1,5 +1,5 @@
 // Joins recording parts into one file. A phone can stop recording when the app goes
-// to the background; the app then records a new part. Soniox needs one file per
+// to the background; the app then records a new part. The speech engine needs one file per
 // meeting, so the parts are joined here (temp files, deleted straight after).
 import ffmpegPath from 'ffmpeg-static';
 import { execFile } from 'node:child_process';

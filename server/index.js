@@ -1,12 +1,12 @@
-// DG-Note server. No database: audio is held in memory only while it is sent
-// to Soniox, and the file and transcription are deleted from Soniox once the
+// DG-Note server (ForgeHype Meet engine). No database: audio is held in memory only while it is sent
+// to the speech engine, and the file and transcription are deleted from the engine once the
 // transcript has been fetched. Results are kept in memory for one hour.
 import 'dotenv/config';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import * as soniox from './soniox.js';
+import * as engine from './engine.js';
 import { buildResult } from './build.js';
 import { ROSTER, DEPARTMENTS, DOMAIN_TERMS } from './roster.js';
 import * as auth from './auth.js';
@@ -24,13 +24,13 @@ app.set('trust proxy', 1); // Render runs behind a proxy: needed for secure cook
 app.use(express.static(publicDir));
 auth.mount(app, express);
 
-app.get('/api/health', (req, res) => res.json({ ok: true, soniox: soniox.configured(), model: soniox.MODEL }));
+app.get('/api/health', (req, res) => res.json({ ok: true, engine: engine.configured() }));
 app.get('/api/roster', auth.requireUser, (req, res) => res.json({ people: ROSTER, departments: Object.keys(DEPARTMENTS) }));
 
 // Body = the raw audio file (or several parts back to back, with header
 // X-Parts: "size1,size2,..."). Query: title, introEndMs, durationMs.
 app.post('/api/solo/jobs', auth.requireUser, express.raw({ type: () => true, limit: '500mb' }), (req, res) => {
-  if (!soniox.configured()) return res.status(503).json({ error: 'The server has no SONIOX_API_KEY. Add it to .env and restart.' });
+  if (!engine.configured()) return res.status(503).json({ error: 'Transcription is not switched on for this server yet. Ask the admin.' });
   const buf = req.body;
   if (!buf || !buf.length) return res.status(400).json({ error: 'No audio received.' });
   const mime = (req.headers['content-type'] || 'audio/webm').split(';')[0];
@@ -66,11 +66,11 @@ async function run(job, parts, mime, ext) {
     parts = null;
     let buf = joined.buffer;
     if (joined.joined) { mime = joined.mime; ext = joined.ext; job.step = 'upload'; }
-    const file = await soniox.uploadFile(buf, `dg-note-${job.id}.${ext}`, mime);
+    const file = await engine.uploadFile(buf, `dg-note-${job.id}.${ext}`, mime);
     fileId = file.id;
     buf = null; // let the audio go from memory
     job.step = 'queued';
-    const tr = await soniox.createTranscription({
+    const tr = await engine.createTranscription({
       file_id: fileId,
       language_hints: ['en', 'ar'],
       enable_speaker_diarization: true,
@@ -90,27 +90,38 @@ async function run(job, parts, mime, ext) {
     const started = Date.now();
     for (;;) {
       await sleep(2000);
-      const st = await soniox.getTranscription(trId);
+      const st = await engine.getTranscription(trId);
       job.step = st.status; // queued | processing | completed | error
       if (st.status === 'completed') { job.durationMs ||= st.audio_duration_ms || 0; break; }
-      if (st.status === 'error') throw new Error(st.error_message || 'Soniox could not transcribe this recording.');
+      if (st.status === 'error') throw Object.assign(new Error(st.error_message || 'transcription error'), { userMessage: 'This recording could not be transcribed. Check that it has speech, then try again.' });
       if (Date.now() - started > MAX_WAIT_MS) throw new Error('Transcription took too long. Try again.');
     }
     job.step = 'naming';
-    const transcript = await soniox.getTranscript(trId);
+    const transcript = await engine.getTranscript(trId);
     job.result = buildResult(transcript.tokens, { introEndMs: job.introEndMs, durationMs: job.durationMs, roster: ROSTER, departments: DEPARTMENTS });
     job.status = 'done'; job.step = 'done';
   } catch (e) {
-    console.error(`[job ${job.id}]`, e.message);
-    job.status = 'error'; job.error = e.message;
+    console.error(`[job ${job.id}]`, e.message);   // full detail stays in the server log only
+    job.status = 'error'; job.error = friendly(e);
   } finally {
-    if (trId) soniox.deleteTranscription(trId).catch(e => console.warn('delete transcription:', e.message));
-    if (fileId) soniox.deleteFile(fileId).catch(e => console.warn('delete file:', e.message));
+    if (trId) engine.deleteTranscription(trId).catch(e => console.warn('delete transcription:', e.message));
+    if (fileId) engine.deleteFile(fileId).catch(e => console.warn('delete file:', e.message));
     setTimeout(() => jobs.delete(job.id), KEEP_MS).unref();
   }
 }
 
+// What the user sees when something goes wrong: no engine names, no technical detail.
+function friendly(e) {
+  if (e.userMessage) return e.userMessage;
+  if (e.status === 401 || e.status === 403) return 'Transcription is not set up correctly on the server. Ask the admin. Your recording is safe on this phone.';
+  if (e.status === 402 || /balance|credit|budget|payment/i.test(e.message)) return 'The transcription account has reached its limit. Ask the admin. Your recording is safe on this phone.';
+  if (e.status === 429) return 'Transcription is busy right now. Try again in a minute. Your recording is safe on this phone.';
+  if (/too long|duration/i.test(e.message)) return 'This recording is too long to transcribe in one go (60 minutes maximum for now).';
+  if (/join/i.test(e.message)) return e.message;
+  return 'Transcription failed. Your recording is safe on this phone. Try again.';
+}
+
 app.listen(PORT, () => {
   console.log(`DG-Note running on http://localhost:${PORT}`);
-  if (!soniox.configured()) console.warn('SONIOX_API_KEY is not set. Copy .env.example to .env and add your key.');
+  if (!engine.configured()) console.warn('SONIOX_API_KEY is not set. Copy .env.example to .env and add your key.');
 });

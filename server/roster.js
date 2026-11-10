@@ -1,5 +1,5 @@
 // Sample people for testing. No database yet: this list stands in for the
-// organisation's staff directory. Names here are passed to Soniox as context
+// organisation's staff directory. Names here are passed to the speech engine as context
 // (so it spells them right) and used to match spoken introductions.
 export const ROSTER = [
   { id: 'ahmed',  name: 'Dr. Ahmed Al-Kuwari', ar: 'أحمد الكواري',  dept: 'Geriatrics',        email: 'ahmed.alkuwari@carehome.qa' },
@@ -23,5 +23,5 @@ export const DEPARTMENTS = {
   'Administration':    ['administration', 'admin', 'management', 'الإدارة', 'الادارة'],
 };
 
-// Extra words that help Soniox in elderly-care meetings.
+// Extra words that help the speech engine in elderly-care meetings.
 export const DOMAIN_TERMS = ['amlodipine', 'metformin', 'insulin', 'blood pressure', 'physiotherapy', 'walker', 'dietitian', 'swallowing screen', 'bed-exit alarm'];

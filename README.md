@@ -1,5 +1,7 @@
 # DG-Note
 
+> In the app, transcription is branded **ForgeHype Meet**. The speech provider (Soniox) is never shown to users; it appears only in server settings and this developer guide.
+
 Meeting notes by ForgeHype. One phone on the table records the meeting, Soniox transcribes Arabic and English, and each voice is named from the introductions at the start.
 
 **Status: step 1 of 6.** The Solo tab records and transcribes for real. Group and the sample reports are still the design prototype. See [docs/ROADMAP.md](docs/ROADMAP.md).
@@ -77,7 +79,7 @@ npm test            # name matching and transcript building
 | Path | What it does |
 |---|---|
 | `server/index.js` | Web server and the `/api/solo/jobs` endpoints |
-| `server/soniox.js` | Soniox REST calls (upload, transcribe, poll, fetch, delete) |
+| `server/engine.js` | Speech engine calls (upload, transcribe, poll, fetch, delete). Provider: Soniox, set by `SONIOX_API_KEY` |
 | `server/build.js` | Soniox tokens → speaker segments, English text, unclear words |
 | `server/names.js` | Finds each speaker's name and department in their introduction |
 | `server/roster.js` | Sample staff list (stands in for the database) |

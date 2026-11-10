@@ -1,4 +1,4 @@
-// Thin wrapper over the Soniox async REST API (https://docs.soniox.com/api-reference).
+// Speech engine connection (async file transcription). Provider settings come from the environment.
 const BASE = (process.env.SONIOX_API_BASE || 'https://api.soniox.com/v1').replace(/\/$/, '');
 const KEY = () => process.env.SONIOX_API_KEY || '';
 export const MODEL = process.env.SONIOX_MODEL || 'stt-async-v6';
@@ -11,7 +11,7 @@ async function call(path, opts = {}) {
   let json; try { json = body ? JSON.parse(body) : null; } catch { json = null; }
   if (!res.ok) {
     const msg = json?.message || json?.error_message || json?.detail || body.slice(0, 300) || res.statusText;
-    throw new Error(`Soniox ${opts.method || 'GET'} ${path} → ${res.status}: ${msg}`);
+    throw Object.assign(new Error(`speech engine ${opts.method || 'GET'} ${path} → ${res.status}: ${msg}`), { status: res.status });
   }
   return json;
 }
