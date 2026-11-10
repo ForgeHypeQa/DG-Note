@@ -15,7 +15,7 @@ const USERS = [
     id: 'admin', name: 'ForgeHype Admin', short: 'FH', role: 'admin', enabled: true,
     // ForgeHype email (hashed). Override with ADMIN_LOGIN_HASH / ADMIN_PASSWORD_HASH in the host's settings.
     loginHash: process.env.ADMIN_LOGIN_HASH || '2c86b48f3de0c2f4969d7bef7e45d5c2:ee6d67f64817485324331f312cb2abaa392a7eb8905741f52284b602f02f0239',
-    pwHash: process.env.ADMIN_PASSWORD_HASH || '502a426f8da7d8825e7d952c58a88f7e:f54c109006cf7c2af128a7aaeec6aa7919d0ce24c3db024f8cc3bd2d81a37254',
+    pwHash: process.env.ADMIN_PASSWORD_HASH || '8b22dcd4869cd8632d472eee74a5b858:2b8e35397b6b1eead5f37d17c96d0527e3a0881fccb5b3960c909553aefe67ff',
   },
   ...[1, 2, 3, 4, 5, 6].map(n => ({ id: `guest${n}`, name: `Guest ${n}`, short: `G${n}`, role: 'guest', enabled: true, pwHash: GUEST_PW })),
 ];
@@ -81,7 +81,9 @@ export function mount(app, express) {
   app.post('/api/login', express.json({ limit: '10kb' }), (req, res) => {
     if (blocked(req)) return res.status(429).json({ error: 'Too many wrong tries. Wait a minute and try again.' });
     const u = findUser(req.body?.login);
-    if (!u || !check(req.body?.password, u.pwHash)) { failed(req); return res.status(401).json({ error: 'Email or password is not right.' }); }
+    // Admin password ignores capital letters (stored as lower case), so phone keyboards don't trip it up.
+    const pw = u?.role === 'admin' ? String(req.body?.password || '').toLowerCase() : req.body?.password;
+    if (!u || !check(pw, u.pwHash)) { failed(req); return res.status(401).json({ error: 'Email or password is not right.' }); }
     if (!u.enabled) return res.status(403).json({ error: 'This account is switched off. Ask the admin.' });
 
     // One session per account: signing in again replaces the old one.
