@@ -112,7 +112,7 @@ test('one person split into several voices is joined back', () => {
     ...line('1', 9000, 'Mr. Khalid fell twice this week.', 4000),
     ...line('3', 13200, 'both at night', 1500),               // fragment of Sara, 1.5 s
     ...line('2', 16000, 'His gait is unsteady so I suggest a walker.', 5000),
-    ...line('4', 22000, 'Great, John. ' + 'We need the family meeting booked and the alarm consent signed before Thursday please '.repeat(3), 25000),   // real but unintroduced, 25 s
+    ...line('4', 22000, 'Great, John. We need the family meeting booked before Thursday.', 6000),   // real but unintroduced, 6 s
   ];
   const r = buildResult(tokens, { roster: ROSTER, departments: DEPARTMENTS });
   assert.deepEqual(r.speakers.map(s => s.name || 'Speaker ' + s.index), ['Sara Mendes', 'Joseph Thomas', 'Speaker 3']);
@@ -122,4 +122,12 @@ test('one person split into several voices is joined back', () => {
 test('stray foreign words do not count as a language', () => {
   const tokens = [...line('1', 0, "I'm Sara Mendes. " + 'we discussed the plan for the week in detail '.repeat(4), 8000), ...line('2', 9000, 'شكرا', 500, 'ar')];
   assert.deepEqual(buildResult(tokens, { roster: ROSTER, departments: DEPARTMENTS }).languages, ['en']);
+});
+
+test('five people who never introduce themselves are all kept', () => {
+  const tokens = [];
+  let t = 0;
+  for (let round = 0; round < 2; round++) for (const sp of ['1', '2', '3', '4', '5']) { tokens.push(...line(sp, t, 'I think we should look at the numbers again before we decide.', 4500)); t += 5000; }
+  const r = buildResult(tokens, { roster: ROSTER, departments: DEPARTMENTS });
+  assert.deepEqual(r.speakers.map(s => 'Speaker ' + s.index), ['Speaker 1', 'Speaker 2', 'Speaker 3', 'Speaker 4', 'Speaker 5']);
 });

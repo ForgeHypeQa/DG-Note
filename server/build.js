@@ -24,7 +24,7 @@ function markWords(words, idPrefix) {
   }).join(' ').replace(/\s+([.,!?;:،؟])/g, '$1');
 }
 
-export function buildResult(tokens, { introEndMs = 0, roster, departments, durationMs = 0, maxSpeakers = 4 } = {}) {
+export function buildResult(tokens, { introEndMs = 0, roster, departments, durationMs = 0 } = {}) {
   // 1. Split into segments: a new segment when the speaker changes,
   //    or when a translated sentence has finished and original speech resumes.
   const raw = [];
@@ -74,11 +74,10 @@ export function buildResult(tokens, { introEndMs = 0, roster, departments, durat
   // 3. Who is who, per voice the engine found.
   let speakers = describeSpeakers(segments, { introEndMs, roster, departments });
 
-  // 4. The engine sometimes splits one person into several voices. Keep only the real ones:
-  //    everyone who introduced themselves, plus anyone who spoke a substantial amount.
-  //    Short fragments from unintroduced "voices" are given back to the person speaking next to them.
+  // 4. The engine sometimes splits a tiny extra "voice" off a person (a word or two).
+  //    Those fragments are given back to the person speaking next to them. Real speakers are all kept.
   const total = segments.reduce((a, s) => a + (s.endMs - s.startMs), 0);
-  const kept = pickRealSpeakers(speakers, total, maxSpeakers);
+  const kept = pickRealSpeakers(speakers, total, segments);
   if (kept.size < speakers.length) {
     for (let i = 0; i < segments.length; i++) {
       if (kept.has(segments[i].speaker)) continue;
@@ -135,13 +134,14 @@ function describeSpeakers(segments, { introEndMs, roster, departments }) {
   });
 }
 
-// Which voices are real people: introduced ones always; unintroduced ones only if they spoke
-// at least 15 s and 10% of the meeting. Never more than maxSpeakers unless more introduced themselves.
-function pickRealSpeakers(speakers, totalMs, maxSpeakers) {
-  const introduced = speakers.filter(s => s.how !== 'none');
-  const substantial = speakers.filter(s => s.how === 'none' && s.talkMs >= 15000 && s.talkMs >= totalMs * 0.10).sort((a, b) => b.talkMs - a.talkMs);
-  const room = Math.max(0, maxSpeakers - introduced.length);
-  let keep = [...introduced, ...substantial.slice(0, room)];
+// Which voices are real people. The engine is usually right about how many people spoke;
+// it only sometimes splits off a tiny extra "voice" (a cough, a word or two). Those are merged back:
+// a voice that never introduced itself and spoke under 2.5 s in total, in no more than 2 bits.
+// Everyone else is kept, however many there are; the user can join two voices on the "Who spoke" screen.
+function pickRealSpeakers(speakers, totalMs, segments) {
+  const tinyMs = 2500;   // a cough, "yeah", "mm-hmm": anything longer is treated as a real person (join by hand if not)
+  const turns = label => segments.filter(s => s.speaker === label).length;
+  let keep = speakers.filter(s => s.how !== 'none' || s.talkMs >= tinyMs || turns(s.label) > 2);
   if (!keep.length) keep = [...speakers].sort((a, b) => b.talkMs - a.talkMs).slice(0, 1);
   return new Set(keep.map(s => s.label));
 }

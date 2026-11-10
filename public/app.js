@@ -276,6 +276,9 @@ function cardHTML(i){
     </button>
     <div class="fbody"><div class="fin"><div class="fpad">
       <p class="heard">Heard: <span dir="auto">“${esc(x.heard||'…')}”</span></p>
+      ${(()=>{const others=ST.solo.speakers.filter(y=>y!==x&&!y.mergedInto);const joined=ST.solo.speakers.filter(y=>y.mergedInto===x.label);
+        return (joined.length?`<p class="heard"><b>Joined with ${joined.map(y=>'Speaker '+y.index).join(', ')}</b> ${joined.map(y=>`<button class="unjoin" data-act="sp-unmerge" data-l="${esc(y.label)}">Separate ${'Speaker '+y.index}</button>`).join(' ')}</p>`:'')
+          +(others.length?`<div class="same"><span>Same person as</span>${others.map(y=>`<button data-act="sp-merge" data-i="${i}" data-into="${esc(y.label)}">${esc(spName(y))}</button>`).join('')}</div>`:'');})()}
       ${sugg.map(c=>`<button class="sugg" data-act="sp-pick" data-i="${i}" data-id="${esc(c.id)}">Use “${esc(c.name)} · ${esc(c.dept)}” from the staff list</button>`).join('')}
       <label>Name<input data-f="n" value="${esc(x.name)}" placeholder="Speaker ${x.index}" list="rosterNames" autocomplete="off" dir="auto"></label>
       <label>Title or role <i>optional</i><input data-f="r" value="${esc(x.role||'')}" placeholder="e.g. Head Nurse, Finance Manager" autocomplete="off" dir="auto"></label>
@@ -317,9 +320,9 @@ function viewSolo(){
      <button class="btn2" data-act="solo-save-audio">Save the audio file</button>
      <button class="btn2" data-act="solo-new">Back to Solo</button>`);
   if(s.phase==='review') return capsheet(
-    `<div class="eyebrow">Transcript ready</div><h1 class="mt">Who spoke</h1><p class="sub">Names come from the introductions. Tap a card to change one.</p>${tableHTML()}`,
-    `<div class="sech"><h2>Speakers</h2><span>${s.speakers.length} ${s.speakers.length===1?'voice':'voices'}</span></div>
-     <div class="stack" id="sStack">${s.speakers.map((x,i)=>cardHTML(i)).join('')}</div>
+    `<div class="eyebrow">Transcript ready</div><h1 class="mt">Who spoke</h1><p class="sub">Names come from the introductions. Tap a card to name someone, or to join two voices that are the same person.</p>${tableHTML()}`,
+    `<div class="sech"><h2>Speakers</h2><span>${(n=>n+(n===1?' person':' people'))(s.speakers.filter(x=>!x.mergedInto).length)}</span></div>
+     <div class="stack" id="sStack">${s.speakers.map((x,i)=>x.mergedInto?'':cardHTML(i)).join('')}</div>
      <datalist id="rosterNames">${ROSTER.map(p=>`<option value="${esc(p.name)}">`).join('')}</datalist>
      <button class="cta" data-act="solo-open">Open the transcript</button>
      <button class="btn2" data-act="solo-save-audio">Save the audio file</button>
@@ -343,18 +346,20 @@ function soloNow(){
 }
 function syncSolo(){
   const s=ST.solo;if(!$('#tbl'))return;
-  const sp=s.phase==='review'?s.speakers:[];
+  const sp=s.phase==='review'?s.speakers.filter(x=>!x.mergedInto):[];
   [0,1,2,3].forEach(i=>{const e=$('#seat'+i),x=sp[i];e.className='seat s'+i+(x?' on':'');e.textContent=x?(x.name?ini(x.name):x.index):'';if(x)e.style.setProperty('--c',x.c);});
   $('#tbl').classList.toggle('paused',s.paused);
   const n=$('#sNow');if(n)n.innerHTML=soloNow();
 }
 // Speakers → people in the report. Anyone who didn't introduce themselves is "Speaker 1", "Speaker 2"…
 // Two speakers given the same name become one person.
+// A voice marked "same person as" another takes that person's identity.
+function rootOf(x,speakers){let r=x,n=0;while(r.mergedInto&&n++<10){const t=speakers.find(y=>y.label===r.mergedInto);if(!t)break;r=t;}return r;}
 function peopleFrom(speakers){
   const people=[],idx={},mapP={};
-  speakers.forEach(x=>{const n=spName(x).trim(),key=n.toLowerCase();
+  speakers.forEach(x0=>{const x=rootOf(x0,speakers),n=spName(x).trim(),key=n.toLowerCase();
     if(!(key in idx)){idx[key]=people.length;people.push({n,r:x.role||'',d:x.dept||'',o:x.org||'',e:x.email||rosterBy(n)?.email||'',c:x.c,labels:[]});}
-    people[idx[key]].labels.push(x.label);mapP[x.label]=idx[key];});
+    people[idx[key]].labels.push(x0.label);mapP[x0.label]=idx[key];});
   return {people,mapP};
 }
 // Re-applies speaker names to a saved report (after a rename in the report).
@@ -362,6 +367,7 @@ function relabel(r){
   const {people,mapP}=peopleFrom(r.speakers);r.people=people;
   r.tx=r.tx.map((l,i)=>({...l,p:mapP[r.result.segments[i]?.speaker]??l.p}));
 }
+function saveSoloSpeakers(){const s=ST.solo,r=ST.reports.find(x=>x.id===s.rid);if(r){r.speakers=s.speakers.map(({open,...y})=>y);saveReport(r);}}
 function buildRealReport(){
   const s=ST.solo,res=s.result,{people,mapP}=peopleFrom(s.speakers);
   const dms=res.durationMs||(s.t||0)*1000, st=s.startedAt?new Date(s.startedAt):new Date(Date.now()-dms), en=new Date(st.getTime()+dms);
@@ -644,11 +650,16 @@ const ACT={
  'solo-pending'(){const s=ST.solo,m=s.pending;if(!m)return;Object.assign(s,{title:m.title||'',introEndMs:m.introEndMs||0,t:m.durationSec||0,startedAt:m.startedAt,pending:null});processMeeting(m.mid);},
  async 'solo-discard'(){const s=ST.solo;if(!s.pending)return;await DB.remove(s.pending.mid).catch(()=>{});s.pending=null;render();toast('Recording deleted from this phone');},
  'sp-toggle'(el){const i=+el.dataset.i,x=ST.solo.speakers[i];x.open=!x.open;$('#fc'+i).classList.toggle('open',x.open);el.setAttribute('aria-expanded',x.open);},
+ 'sp-merge'(el){const s=ST.solo,x=s.speakers[+el.dataset.i],t=s.speakers.find(y=>y.label===el.dataset.into);if(!x||!t)return;
+   // anyone already joined to x moves to t as well
+   s.speakers.forEach(y=>{if(y.mergedInto===x.label)y.mergedInto=t.label;});x.mergedInto=t.label;x.open=false;t.open=false;
+   saveSoloSpeakers();render();toast(`Speaker ${x.index} joined with ${esc(spName(t))}`);},
+ 'sp-unmerge'(el){const s=ST.solo,x=s.speakers.find(y=>y.label===el.dataset.l);if(!x)return;delete x.mergedInto;saveSoloSpeakers();render();toast(`Speaker ${x.index} is separate again`);},
  'sp-pick'(el){const i=+el.dataset.i,p=ROSTER.find(r=>r.id===el.dataset.id),c=$('#fc'+i);if(!p)return;c.querySelector('[data-f=n]').value=p.name;c.querySelector('[data-f=d]').value=p.dept;},
  'sp-save'(el){const i=+el.dataset.i,s=ST.solo,x=s.speakers[i],c=$('#fc'+i),v=f=>c.querySelector(`[data-f=${f}]`).value.trim(),n=v('n');
    const p=rosterBy(n);x.name=n;x.role=v('r');x.dept=v('d');x.org=v('o');x.email=p?p.email:'';x.edited=true;x.open=false;
    c.outerHTML=cardHTML(i);syncSolo();toast(n?'Name saved for this voice':'Name cleared');
-   const r=ST.reports.find(x=>x.id===s.rid);if(r){r.speakers=s.speakers.map(({open,...y})=>y);saveReport(r);}},
+   saveSoloSpeakers();},
  'solo-open'(){const s=ST.solo;const r=buildRealReport();ST.reports=[r,...ST.reports.filter(x=>x.id!==r.id)];saveReport(r);
    Object.assign(s,{phase:'idle',t:0,paused:false,introEndMs:0,speakers:[],result:null,title:'',rid:null,err:'',mid:null,parts:null,blob:null});
    openReport(r.id);ST.open['r-tx']=true;render();},

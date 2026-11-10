@@ -351,3 +351,9 @@ button.sp{cursor:pointer}
 @media (display-mode: standalone){ .hdr,.lhero{padding-top:calc(16px + env(safe-area-inset-top))} .dock{bottom:calc(12px + env(safe-area-inset-bottom))} }
 .langs{font-size:16px;margin-top:8px;color:#fff;font-weight:600}
 .to:not([lang=ar]){direction:ltr;text-align:left;font-family:var(--font);font-style:italic}
+
+/* "same person as" on speaker cards */
+.same{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.same span{font-size:12px;font-weight:650;color:rgba(2,1,2,.66);width:100%}
+.same button{background:rgba(2,1,2,.1);border-radius:999px;padding:7px 12px;font-size:13px;font-weight:700}
+.unjoin{background:rgba(2,1,2,.1);border-radius:999px;padding:4px 10px;font-size:12px;font-weight:700;margin-left:4px}
