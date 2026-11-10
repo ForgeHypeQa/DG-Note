@@ -90,3 +90,16 @@ test('normal talk is not an introduction', () => {
   assert.equal(P('Let us start with room twelve.').name, '');
   assert.equal(P('Okay, next item is the budget.').name, '');
 });
+test('"I am late" and similar are not names', () => {
+  for (const t of ['Sorry I am late. The pharmacy delivery comes on Sunday.', "I'm not sure about that.", 'This is important for the family.', "I'm going to check the chart.", 'أنا متأخر، آسف.'])
+    assert.equal(P(t).name, '', t);
+});
+test('"I am" with a real name still works', () => {
+  assert.equal(P("I'm Fatima, social worker.").name, 'Fatima');
+  assert.equal(P('My name is fatima al-marri.').name, 'Fatima Al-Marri');
+  assert.equal(P('This is Dr. Priya.').name, 'Dr. Priya');
+});
+test('no introduction gives no details either', () => {
+  const r = identify('Sorry I am late. The pharmacy delivery comes on Sunday.', ROSTER, DEPARTMENTS);
+  assert.deepEqual([r.name, r.role, r.dept, r.org, r.how], ['', '', '', '', 'none']);
+});

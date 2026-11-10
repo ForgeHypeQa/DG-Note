@@ -90,8 +90,12 @@ export function findDepartment(text, departments) {
    parseIntro() picks out whichever of name, title (role), organisation and department were said. */
 
 const GREETING = /^(?:\s*(?:hi|hello|hey|hiya|good\s+(?:morning|afternoon|evening)|morning|salam|salaam|assalamu?\s*alaikum|as-?salamu\s*alaykum|everyone|all|guys|team|مرحبا|مرحباً|السلام عليكم|صباح الخير|مساء الخير|أهلا|اهلا)[\s,!.،]*)+/i;
-const EN_TRIGGER = /\b(?:my\s+name\s+is|my\s+name's|i\s+am|i'm|im|this\s+is|it's|it\s+is|here\s+is|call\s+me)\s+(.+)/i;
-const AR_TRIGGER = /(?:^|\s)(?:انا|أنا|اسمي|معكم|معك|هنا)\s+(.+)/;
+const EN_TRIGGER = /\b(my\s+name\s+is|my\s+name's|call\s+me|i\s+am|i'm|im|this\s+is|it's|it\s+is|here\s+is)\s+(.+)/i;
+// "My name is X" is always a name. "I'm X" / "This is X" only when X looks like a name
+// (capital letter, not an everyday word): "I'm late", "I'm not sure", "this is important" are not introductions.
+const STRONG = /^(my\s+name\s+is|my\s+name's|call\s+me)$/i;
+const AR_TRIGGER = /(?:^|\s)(انا|أنا|اسمي|معكم|معك|هنا)\s+(.+)/;
+const AR_NOT_NAME = new Set(['متأخر','متاخر','متأخرة','آسف','اسف','آسفة','موافق','موافقة','شايف','شايفة','أعتقد','اعتقد','أظن','اظن','مش','ما','لا','بس','هنا','جاهز','جاهزة','معكم','معك','أبغى','ابغى','أريد','اريد','رأيي','متفق','متفقة','عندي','كنت','سوف','راح','بخير','الحمد']);
 const TITLE_EN = /^(?:dr\.?|doctor|mr\.?|mrs\.?|ms\.?|miss|eng\.?|engineer|prof\.?|professor|sheikh|sheikha)$/i;
 const TITLE_AR = /^(?:د\.?|دكتور|دكتورة|الدكتور|الدكتورة|م\.?|المهندس|المهندسة|مهندس|الأستاذ|الأستاذة|أستاذ|أستاذة|الشيخ|الشيخة)$/;
 
@@ -102,7 +106,7 @@ const AR_ORG = /(?:^|\s)((?:وزارة|مستشفى|مستشفي|مؤسسة|شر
 const AR_NOT = '(?!(?:في|من|مع|و|قسم)(?:\\s|$))(?!(?:وزارة|مستشفى|مؤسسة|شركة|مركز|جامعة|مجلس|هيئة|بنك))';
 const AR_ROLE = new RegExp(`(?:^|\\s)((?:ال)?(?:مدير|رئيس|نائب|منسق|مشرف|أخصائي|اخصائي|ممرض|طبيب|استشاري|صيدلي|صيدلاني|محامي|مستشار|مهندس|موظف|سكرتير|محاسب|باحث)[ةه]?(?:\\s+${AR_NOT}[^\\s،,.]+){0,2})`);
 const AR_DEPT = new RegExp(`(?:^|\\s)قسم\\s+([^\\s،,.]+(?:\\s+${AR_NOT}[^\\s،,.]+)?)`);
-const NOT_NAME = new Set(['let','lets','let\'s','we','so','okay','ok','yes','no','the','this','that','today','first','next','good','thank','thanks','please','can','could','should','will','what','how','when','our','us','he','she','they','it','there','now','right','alright','well','then','also','and','but','because','if','as','about','regarding','agenda','meeting','item','moving','start','starting','welcome','hi','hello','yeah','sure']);
+const NOT_NAME = new Set(['sorry','late','not','going','gonna','fine','happy','glad','afraid','agree','done','ready','back','still','very','really','just','sure','here','new','looking','trying','calling','joining','speaking','talking','wondering','thinking','worried','concerned','responsible','in','on','at','with','from','a','an','to','for','one','also','actually','currently','basically','let','lets','let\'s','we','so','okay','ok','yes','no','the','this','that','today','first','next','good','thank','thanks','please','can','could','should','will','what','how','when','our','us','he','she','they','it','there','now','right','alright','well','then','also','and','but','because','if','as','about','regarding','agenda','meeting','item','moving','start','starting','welcome','hi','hello','yeah','sure']);
 const EN_STOP = new Set(['from','in','with','and','of','at','i','i\'m','im','working','work','works','the','a','an','department','dept','team','unit','here','speaking','representing','for','on','as','my','our','today','also','just','who','which','role','position','title','is','am','currently']);
 const AR_STOP = new Set(['من','في','مع','و','قسم','وأنا','وانا','أعمل','اعمل','بصفتي','كـ']);
 
@@ -119,7 +123,17 @@ function cleanWord(w) { return w.replace(/[.,;:!?،؛"“”«»()]/g, ''); }
 function nameFrom(text) {
   const src = String(text || '').replace(/\s+/g, ' ').trim().replace(GREETING, '').trim();
   let m = src.match(EN_TRIGGER), ar = false;
-  if (!m) { m = src.match(AR_TRIGGER); ar = !!m; }
+  if (m) {
+    const w0 = cleanWord(m[2].split(/\s+/)[0] || ''), w1 = TITLE_EN.test(w0) ? cleanWord(m[2].split(/\s+/)[1] || '') : w0;
+    if (!STRONG.test(m[1]) && (!/^[A-Z]/.test(w1) || NOT_NAME.has(w1.toLowerCase()))) m = null;   // "I'm late"
+  }
+  if (!m) { m = src.match(AR_TRIGGER); ar = !!m;
+    if (m && m[1] !== 'اسمي') { const w0 = cleanWord(m[2].split(/\s+/)[0] || ''); if (AR_NOT_NAME.has(w0) || TITLE_AR.test(w0) && AR_NOT_NAME.has(cleanWord(m[2].split(/\s+/)[1] || ''))) { m = null; ar = false; } }
+  }
+  if (m) m = [m[0], m[2]];
+  // An "I'm late"-type sentence is not an introduction at all.
+  if (!m && /\b(?:i\s+am|i'm|im)\s+(?:sorry|late|not|going|just|here|afraid|fine|sure)\b/i.test(src)) return { name: '', dr: false };
+  if (!m && /^(?:أنا|انا)\s/.test(src)) return { name: '', dr: false };
   let rest = m ? m[1] : src, latin = isLatin(rest.split(/\s+/)[0] || '');
   if (!m && !ar && /[؀-ۿ]/.test(rest.split(/\s+/)[0] || '')) ar = true;
   const words = rest.split(' '), out = [];
@@ -221,5 +235,6 @@ export function identify(introText, roster, departments) {
     return { name: top.person.name, role: said.role, org: said.org, dept: said.dept || top.person.dept, email: top.person.email, how: 'roster', score: +top.score.toFixed(2), candidates };
   }
   if (said.name) return { ...said, email: '', how: 'heard', score: 0, candidates };
-  return { ...said, name: '', email: '', how: 'none', score: 0, candidates };
+  // No introduction heard: don't guess a title or department from what they talked about.
+  return { name: '', role: '', org: '', dept: '', email: '', how: 'none', score: 0, candidates };
 }

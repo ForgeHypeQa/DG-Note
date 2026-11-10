@@ -18,6 +18,7 @@ const LINES = [
   ['3', 'ar', 'هو ياخذ أملوديبين عشرة ملغ، وممكن يسبب دوخة لما يوقف.', 27000, 'He takes amlodipine 10 mg, which can cause dizziness when he stands up.'],
   ['4', 'en', 'I will book the family meeting for Thursday at eleven.', 33000],
   ['1', 'en', 'We will move night checks to every two hours, starting tonight.', 38000],
+  ['5', 'en', 'Sorry I am late. The pharmacy delivery comes on Sunday.', 41000],
 ];
 const UNSURE = new Set(['Thursday']);
 

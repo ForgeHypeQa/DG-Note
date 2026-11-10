@@ -5,7 +5,7 @@ const pad=n=>String(n).padStart(2,'0');
 const mmss=s=>pad(Math.floor(s/60))+':'+pad(Math.floor(s%60));
 const hm=d=>pad(d.getHours())+':'+pad(d.getMinutes());
 const ini=n=>n.replace(/^Dr\.\s*/,'').split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase();
-const first=n=>/^Dr\./.test(n)?n.split(/\s+/).slice(0,2).join(' '):n.split(/\s+/)[0];
+const first=n=>/^Speaker \d+$/.test(n)?n:/^Dr\./.test(n)?n.split(/\s+/).slice(0,2).join(' '):n.split(/\s+/)[0];
 const durTxt=s=>s<60?Math.max(1,Math.round(s))+' sec':Math.round(s/60)+' min';
 const IC={
  chev:'<path d="M6 9l6 6 6-6"/>', back:'<path d="M15 18l-6-6 6-6"/>', fwd:'<path d="M9 6l6 6-6 6"/>',
@@ -348,11 +348,22 @@ function syncSolo(){
   $('#tbl').classList.toggle('paused',s.paused);
   const n=$('#sNow');if(n)n.innerHTML=soloNow();
 }
+// Speakers → people in the report. Anyone who didn't introduce themselves is "Speaker 1", "Speaker 2"…
+// Two speakers given the same name become one person.
+function peopleFrom(speakers){
+  const people=[],idx={},mapP={};
+  speakers.forEach(x=>{const n=spName(x).trim(),key=n.toLowerCase();
+    if(!(key in idx)){idx[key]=people.length;people.push({n,r:x.role||'',d:x.dept||'',o:x.org||'',e:x.email||rosterBy(n)?.email||'',c:x.c,labels:[]});}
+    people[idx[key]].labels.push(x.label);mapP[x.label]=idx[key];});
+  return {people,mapP};
+}
+// Re-applies speaker names to a saved report (after a rename in the report).
+function relabel(r){
+  const {people,mapP}=peopleFrom(r.speakers);r.people=people;
+  r.tx=r.tx.map((l,i)=>({...l,p:mapP[r.result.segments[i]?.speaker]??l.p}));
+}
 function buildRealReport(){
-  const s=ST.solo,res=s.result,people=[],idx={},mapP={};
-  s.speakers.forEach(x=>{const n=spName(x).trim(),key=n.toLowerCase();
-    if(!(key in idx)){idx[key]=people.length;people.push({n,r:x.role||'',d:x.dept||'',o:x.org||'',e:x.email||rosterBy(n)?.email||'',c:x.c});}
-    mapP[x.label]=idx[key];});
+  const s=ST.solo,res=s.result,{people,mapP}=peopleFrom(s.speakers);
   const dms=res.durationMs||(s.t||0)*1000, st=s.startedAt?new Date(s.startedAt):new Date(Date.now()-dms), en=new Date(st.getTime()+dms);
   const old=s.rid&&ST.reports.find(x=>x.id===s.rid);
   const parts=s.parts||(s.blob?[s.blob]:[]);
@@ -538,8 +549,8 @@ function repDetail(r){
   const dec=`<ol class="nlist ${rtl?'rtl':''} ${ST.rep.shim?'shim':''}" ${rtl?'lang="ar"':''}>${r.dec.map((s,i)=>`<li><span ${E('d'+i,'dec')}>${txt('d'+i,s,tr&&tr.dec[i])}</span></li>`).join('')}${added('dec')}</ol>`;
   const act=r.act.map((a,i)=>{const p=who(a.p),t=tr&&tr.act[i];return `<div class="act"><div class="at ${rtl?'rtl':''}" ${rtl?'dir="rtl" lang="ar"':''} ${E('a'+i,'act')}>${txt('a'+i,a.t,t&&t.t)}</div><div class="am"><span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span><span>${esc(t?t.due:a.due)}</span></div></div>`;}).join('');
   const qs=r.qs.map((q,i)=>{const p=who(q.p),t=tr&&tr.qs[i];return `<div class="act"><div class="at" ${rtl&&t?'dir="rtl" lang="ar"':''}>${esc(t||q.t)}</div><div class="am"><span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span><span>Open</span></div></div>`;}).join('');
-  const ppl=`<p class="note" style="margin-bottom:8px">${r.kind==='solo'?'Named from the voice introductions at the start.':'Named from each person’s login on their own phone.'} ${r.status==='sent'?'Emailed '+esc(r.sentAt)+'.':'The report is emailed to everyone listed.'}</p>`+r.people.map(p=>`<div class="prow"><span class="av lg" style="--c:${p.c}">${ini(p.n)}</span><div class="grow"><b dir="auto">${esc(p.n)}</b>${[p.r,p.d,p.o].filter(Boolean).length?`<small dir="auto">${esc([p.r,p.d,p.o].filter(Boolean).join(' · '))}</small>`:''}<small>${p.e?esc(p.e):'No email on file'}</small></div></div>`).join('');
-  const tx=`<p class="note">${r.real?'Arabic is shown in English, with what was said underneath.':'Clean transcript: grammar fixed and filler words removed.'} ${lang!=='en'?'Shown in English with the original words underneath.':'Orange words were unclear in the audio. Tap one to check it.'}</p>`+r.tx.map((l,i)=>{const p=who(l.p);return `<div class="txl"><div class="th"><span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span><span>${l.t}</span></div><div class="tt" ${E('t'+i,'tx')}>${rt(r,'t'+i,l.s)}</div>${l.o?`<div class="to" lang="ar">${esc(l.o)}</div>`:''}</div>`;}).join('');
+  const ppl=`<p class="note" style="margin-bottom:8px">${r.real?'Named from the introductions. Anyone who didn’t introduce themselves is listed as Speaker 1, 2… Tap a person to change the name.':r.kind==='solo'?'Named from the voice introductions at the start.':'Named from each person’s login on their own phone.'} ${r.status==='sent'?'Emailed '+esc(r.sentAt)+'.':'The report is emailed to everyone listed.'}</p>`+r.people.map((p,k)=>`<${r.real?`button data-act="rep-person" data-p="${k}"`:'div'} class="prow ${r.real?'tap':''}"><span class="av lg" style="--c:${p.c}">${ini(p.n)}</span><div class="grow"><b dir="auto">${esc(p.n)}</b>${[p.r,p.d,p.o].filter(Boolean).length?`<small dir="auto">${esc([p.r,p.d,p.o].filter(Boolean).join(' · '))}</small>`:''}<small>${p.e?esc(p.e):/^Speaker \d+$/.test(p.n)?'Tap to add a name':'No email on file'}</small></div>${r.real?I('fwd','s'):''}</${r.real?'button':'div'}>`).join('');
+  const tx=`<p class="note">${r.real?'Arabic is shown in English, with what was said underneath.':'Clean transcript: grammar fixed and filler words removed.'} ${lang!=='en'?'Shown in English with the original words underneath.':'Orange words were unclear in the audio. Tap one to check it.'}</p>`+r.tx.map((l,i)=>{const p=who(l.p);return `<div class="txl"><div class="th">${r.real?`<button class="sp" style="--c:${p.c}" data-act="rep-person" data-p="${l.p}" aria-label="Rename ${esc(p.n)}">${esc(first(p.n))}</button>`:`<span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span>`}<span>${l.t}</span></div><div class="tt" ${E('t'+i,'tx')}>${rt(r,'t'+i,l.s)}</div>${l.o?`<div class="to" lang="ar">${esc(l.o)}</div>`:''}</div>`;}).join('');
   let seed=7;const rnd=()=>{seed=(seed*16807)%2147483647;return seed/2147483647;};
   const bars=r.tx.map(l=>Array.from({length:Math.max(4,Math.round(l.s.length/12))},()=>`<i style="--c:${who(l.p).c};height:${20+Math.round(rnd()*80)}%"></i>`).join('')+'<i style="--c:#D5D2D0;height:8%"></i>').join('');
   const rec=r.real?((r.audios||[]).length?(r.audios.length>1?`<p class="note" style="margin-bottom:8px">Recorded in ${r.audios.length} parts because the phone paused the recording. The transcript covers all parts.</p>`:'')+r.audios.map((u,k)=>`${r.audios.length>1?`<b style="display:block;font-size:13px;margin:8px 0 4px">Part ${k+1}</b>`:''}<audio class="aud" controls preload="metadata" src="${u}"></audio>`).join('')+`<button class="btn2" style="margin-top:10px" data-act="rep-dl">Save the audio file${r.audios.length>1?'s':''}</button><button class="btn2" style="margin-top:8px" data-act="rep-txt">Save the transcript (.txt)</button><button class="btn2 danger" style="margin-top:8px" data-act="rep-del">Delete this meeting from the phone</button><p class="fine" style="text-align:start;margin-top:8px">Saved on this phone. The server and Soniox delete their copy after transcription.</p>`:'<p class="note">The audio stays on the phone that recorded it.</p>'):`<div style="display:flex;gap:12px;align-items:center"><button class="playb" data-act="rep-play" aria-label="Play recording">${I(ST.rep.play?'pause':'play')}</button><div class="grow"><b style="font-size:15px">${esc(r.title.replace(/[^A-Za-z0-9]+/g,'_'))}.mp3</b><div style="font-size:13px;color:var(--fg2)">${r.dur} · ${r.people.length} speakers · kept for 30 days</div></div></div><div class="wavebars" id="wave">${bars}</div><p class="fine" style="text-align:start;margin-top:8px">Colours show who is speaking. Playback is simulated in this prototype.</p>`;
@@ -588,6 +599,7 @@ function render(){
 /* ================= actions ================= */
 const ACT={
  account(){openAccount();},
+ install(){install();},
  'sign-out'(){signOut();},
  async 'adm-out'(el){await api('/api/admin/signout',{id:el.dataset.id});toast(esc(el.dataset.n)+' signed out');openAccount();},
  async 'adm-en'(el){const on=el.dataset.on!=='1';await api('/api/admin/enable',{id:el.dataset.id,enabled:on});toast(esc(el.dataset.n)+(on?' switched on':' switched off'));openAccount();},
@@ -665,6 +677,24 @@ const ACT={
  'rep-dl'(){const r=curRep();(r?._blobs||[]).forEach((b,k,a)=>setTimeout(()=>saveAudio(b,a.length>1?r.audioName.replace(/(\.\w+)$/,`_part${k+1}$1`):r.audioName),k*600));},
  'rep-txt'(){const r=curRep();if(!r)return;const txt=`${r.title}\n${r.when} · ${r.time} · ${r.dur}\nPeople: ${r.people.map(p=>p.n+([p.r,p.d,p.o].filter(Boolean).length?' ('+[p.r,p.d,p.o].filter(Boolean).join(', ')+')':'')).join('; ')}\n\n`+r.tx.map((l,i)=>`[${l.t}] ${r.people[l.p]?.n||''}: ${r.ed['t'+i]??plain(r,l.s)}${l.o?'\n        ('+l.o+')':''}`).join('\n\n')+'\n';
    const b=new Blob([txt],{type:'text/plain;charset=utf-8'});saveAudio(b,r.audioName.replace(/\.\w+$/,'')+'_transcript.txt');},
+ 'rep-person'(el){const r=curRep();if(!r?.real)return;const k=+el.dataset.p,p=r.people[k];if(!p)return;
+   const sp=r.speakers.find(x=>x.label===p.labels[0])||{};const unnamed=/^Speaker \d+$/.test(p.n);
+   const said=p.labels.map(l=>r.speakers.find(x=>x.label===l)?.heard).filter(Boolean)[0];
+   sheet(`<h3>${unnamed?'Name '+esc(p.n):'Change '+esc(p.n)}</h3><p>The name changes on every line this person said.${said?`</p><p style="font-size:14px">Heard at the start: <span dir="auto">“${esc(said)}”</span>`:''}</p>
+     <div class="stk"><label class="fld"><span>Name</span><input id="ppN" value="${unnamed?'':esc(p.n)}" placeholder="${esc(p.n)}" list="rosterNames2" autocomplete="off" dir="auto"></label>
+     <datalist id="rosterNames2">${ROSTER.map(x=>`<option value="${esc(x.name)}">`).join('')}</datalist>
+     <label class="fld"><span>Title or role (optional)</span><input id="ppR" value="${esc(sp.role||'')}" autocomplete="off" dir="auto"></label>
+     <label class="fld"><span>Department (optional)</span><input id="ppD" value="${esc(sp.dept||'')}" autocomplete="off" dir="auto"></label>
+     <label class="fld"><span>Organisation (optional)</span><input id="ppO" value="${esc(sp.org||'')}" autocomplete="off" dir="auto"></label>
+     <p style="font-size:13px;margin:0">Giving two speakers the same name joins them into one person.</p>
+     <button class="btnk" data-act="rep-person-ok" data-p="${k}">Save</button><button class="btng" data-act="close">Cancel</button></div>`);
+   setTimeout(()=>{const i=$('#ppN');if(i&&unnamed)i.focus();},350);},
+ 'rep-person-ok'(el){const r=curRep();const p=r.people[+el.dataset.p];if(!p)return;
+   const n=$('#ppN').value.trim(),role=$('#ppR').value.trim(),dept=$('#ppD').value.trim(),org=$('#ppO').value.trim(),hit=rosterBy(n);
+   for(const l of p.labels){const x=r.speakers.find(y=>y.label===l);if(!x)continue;x.name=n;x.role=role;x.dept=dept||(n&&hit&&!role&&!org?hit.dept:'');x.org=org;x.email=hit?hit.email:'';x.edited=true;}
+   const now=n||spName(r.speakers.find(y=>y.label===p.labels[0]));
+   if(now!==p.n)r.hist.push({label:'Speaker renamed',from:p.n,to:now,when:hm(new Date())});
+   relabel(r);closeSheet();render();toast(now===p.n?'Saved':'Renamed on every line');},
  'rep-del'(){sheet(`<h3>Delete this meeting?</h3><p>The transcript and the recording are removed from this phone. This cannot be undone.</p><div class="stk"><button class="btnr" data-act="rep-del-ok">Delete</button><button class="btng" data-act="close">Keep it</button></div>`);},
  async 'rep-del-ok'(){closeSheet();const r=curRep();if(!r)return;await deleteReport(r);ST.rep.id=null;render();toast('Meeting deleted from this phone');},
  'u-pick'(el){const r=curRep();r.res[el.dataset.id]=el.dataset.v;r.hist.push({label:'Unclear word checked',from:el.dataset.o?el.dataset.v+' / '+el.dataset.o:el.dataset.v+' (unclear)',to:el.dataset.v,when:hm(new Date())});closeSheet();render();},
@@ -704,6 +734,24 @@ const FORM={
 };
 
 
+/* ================= install as an app ================= */
+let INSTALL_EVT=null;
+const isStandalone=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+const isIOS=()=>/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+if('serviceWorker' in navigator&&location.protocol.startsWith('http'))window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();INSTALL_EVT=e;$$('.instbtn').forEach(b=>b.hidden=false);});
+window.addEventListener('appinstalled',()=>{INSTALL_EVT=null;$$('.instbtn').forEach(b=>b.hidden=true);toast('DG-Note is on your home screen');});
+const installBtn=(cls='btn2')=>isStandalone()?'':`<button type="button" class="${cls} instbtn" data-act="install">${I('device','s')}Add DG-Note to your home screen</button>`;
+async function install(){
+  if(INSTALL_EVT){INSTALL_EVT.prompt();const r=await INSTALL_EVT.userChoice.catch(()=>({}));INSTALL_EVT=null;if(r.outcome!=='accepted')toast('You can add it any time from here');return;}
+  const ios=isIOS();
+  sheet(`<div class="bigic" style="background:none;padding:0"><img src="/icons/icon-192.png" alt="" width="60" height="60" style="border-radius:16px"></div><h3>Add DG-Note to your home screen</h3><p>It opens full screen with its own icon, like any app.</p>
+    <ol class="steps" style="margin-top:16px;color:var(--ink)">${ios
+      ?`<li>Open this page in <b>Safari</b>.</li><li>Tap the <b>Share</b> button (square with an arrow) at the bottom.</li><li>Scroll down and tap <b>Add to Home Screen</b>, then <b>Add</b>.</li>`
+      :`<li>Open this page in <b>Chrome</b>.</li><li>Tap the <b>⋮</b> menu at the top right.</li><li>Tap <b>Add to Home screen</b> or <b>Install app</b>, then <b>Install</b>.</li>`}</ol>
+    <p style="font-size:13px">Address: <b>${esc(location.host)}</b></p><div class="stk"><button class="btnk" data-act="close">Done</button></div>`);
+}
+
 /* ================= sign-in ================= */
 let ME_USER=null,HB_FULL=false;
 async function api(path,body){const r=await fetch(API+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const j=await r.json().catch(()=>({}));if(r.status===401&&path!=='/api/login'){showLogin('You were signed out. Please sign in again.');throw new Error(j.error||'Signed out');}if(!r.ok)throw Object.assign(new Error(j.error||('Error '+r.status)),{status:r.status,body:j});return j;}
@@ -724,6 +772,7 @@ function loginHTML(msg){
      <div class="warnbox" id="lgErr" hidden></div>
      <button class="cta" id="lgBtn">Sign in</button>
      <p class="fine">Demo: up to 4 people can be signed in at the same time.</p>
+     ${installBtn()}
    </form>`;
 }
 function showLogin(msg){
@@ -744,7 +793,7 @@ async function signOut(){
 async function openAccount(){
   const u=ME_USER;if(!u)return;
   const head=`<div style="display:flex;gap:14px;align-items:center"><span class="av lg" style="--c:${u.role==='admin'?'#FF5D00':'#45D3C5'};width:54px;height:54px;font-size:16px">${esc(u.short)}</span><div><h3>${esc(u.name)}</h3><p style="margin:0">${u.role==='admin'?'Admin · full access':'Guest account'}</p></div></div>`;
-  const foot=`<div class="stk"><button class="btnk" data-act="sign-out">Sign out</button>${u.role==='admin'?'<button class="btng" data-act="restart">Reset the sample data</button>':''}<button class="btng" data-act="close">Close</button></div>`;
+  const foot=`<div class="stk">${installBtn('btng')}<button class="btnk" data-act="sign-out">Sign out</button>${u.role==='admin'?'<button class="btng" data-act="restart">Reset the sample data</button>':''}<button class="btng" data-act="close">Close</button></div>`;
   if(u.role!=='admin'){sheet(head+`<p>Signed in on this device. Your meetings stay on this phone until the database is connected.</p>`+foot);return;}
   sheet(head+`<p id="admLoad">Loading who is online…</p>`+foot);
   try{
