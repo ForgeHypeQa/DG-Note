@@ -103,3 +103,23 @@ test('no introduction gives no details either', () => {
   const r = identify('Sorry I am late. The pharmacy delivery comes on Sunday.', ROSTER, DEPARTMENTS);
   assert.deepEqual([r.name, r.role, r.dept, r.org, r.how], ['', '', '', '', 'none']);
 });
+
+const line = (sp, start, text, ms = 3000, lang = 'en') => text.split(' ').map((w, i, a) => ({ text: (i ? ' ' : '') + w, speaker: sp, start_ms: start + Math.round(i * ms / a.length), end_ms: start + Math.round((i + 1) * ms / a.length), confidence: 0.95, language: lang }));
+test('one person split into several voices is joined back', () => {
+  const tokens = [
+    ...line('1', 0, "Hi, I'm Sara Mendes, head nurse."),
+    ...line('2', 4000, "Joseph Thomas, physiotherapy."),
+    ...line('1', 9000, 'Mr. Khalid fell twice this week.', 4000),
+    ...line('3', 13200, 'both at night', 1500),               // fragment of Sara, 1.5 s
+    ...line('2', 16000, 'His gait is unsteady so I suggest a walker.', 5000),
+    ...line('4', 22000, 'Great, John. ' + 'We need the family meeting booked and the alarm consent signed before Thursday please '.repeat(3), 25000),   // real but unintroduced, 25 s
+  ];
+  const r = buildResult(tokens, { roster: ROSTER, departments: DEPARTMENTS });
+  assert.deepEqual(r.speakers.map(s => s.name || 'Speaker ' + s.index), ['Sara Mendes', 'Joseph Thomas', 'Speaker 3']);
+  assert.ok(r.segments.some(s => s.speaker === '1' && /both at night/.test(s.text)));
+  assert.deepEqual(r.languages, ['en']);
+});
+test('stray foreign words do not count as a language', () => {
+  const tokens = [...line('1', 0, "I'm Sara Mendes. " + 'we discussed the plan for the week in detail '.repeat(4), 8000), ...line('2', 9000, 'شكرا', 500, 'ar')];
+  assert.deepEqual(buildResult(tokens, { roster: ROSTER, departments: DEPARTMENTS }).languages, ['en']);
+});
