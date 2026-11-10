@@ -317,3 +317,24 @@ svg.i.s{width:16px;height:16px}
 .pillk{background:var(--acc);color:#fff}.pillg{background:color-mix(in srgb,var(--fg) 10%,transparent)}
 .exq{background:var(--panel2);border-radius:16px;padding:11px 14px;font-size:15px;margin-top:10px;color:#E5E2E1}
 .aud{width:100%;display:block}
+
+/* ---------- sign-in + admin ---------- */
+.app[hidden]{display:none!important}
+.login{background:#000;color:#fff}
+.lhero{background:var(--hdr);border-radius:0 0 var(--R) var(--R);padding:28px 22px 34px}
+.fh-xl{font-size:34px}
+.lform{padding:26px 16px 30px;display:flex;flex-direction:column;gap:14px;color:#fff;color-scheme:dark}
+.lform .fld span{color:var(--mutd)}
+.lform .fld input{background:#161414;border-color:#2C2929;color:#fff}
+.pwrow{position:relative;display:block}
+.pwrow input{padding-right:70px}
+.eye{position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:13px;font-weight:700;color:var(--acc2);padding:8px}
+.me.adm{background:var(--acc);color:#fff}
+.alist{display:flex;flex-direction:column}
+.arow{display:flex;align-items:center;gap:10px;padding:11px 0;border-top:1px solid var(--line)}
+.arow:first-child{border-top:0}
+.arow b{display:block;font-size:15px;font-weight:680}.arow small{font-size:12.5px;color:var(--mut)}
+.arow .dot{width:9px;height:9px;border-radius:50%;background:#D5D2D0;flex:none}
+.arow .dot.on{background:#12B76A;box-shadow:0 0 0 3px #DDF4E8}
+.bsheet .pillg{background:var(--paper);color:var(--ink);padding:7px 12px;font-size:13px}
+.bsheet .pillg.off{background:var(--ink);color:#fff}

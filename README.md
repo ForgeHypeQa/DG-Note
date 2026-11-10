@@ -4,6 +4,23 @@ Meeting notes by ForgeHype. One phone on the table records the meeting, Soniox t
 
 **Status: step 1 of 6.** The Solo tab records and transcribes for real. Group and the sample reports are still the design prototype. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
+## Sign-in (demo)
+
+The app opens on a sign-in screen. Accounts are fixed in `server/auth.js` (no database yet):
+
+| Account | Sign in with | Role |
+|---|---|---|
+| Admin | the ForgeHype email | Full access: sees who is online, can sign people out, switch guests on or off |
+| Guest 1 to Guest 6 | `Guest 1` … `Guest 6` | Can use Solo and Reports |
+
+- At most **4 people** can be signed in at once (`MAX_ONLINE`). A 5th person sees "The demo is full".
+- The admin is never locked out: if the demo is full, the guest idle the longest is signed out.
+- Signing in on a second device replaces the first session for that account.
+- A seat is freed when someone signs out, or after 3 minutes without the app open.
+- 8 wrong passwords in a minute pauses that account for a minute.
+- Logins and passwords are stored only as salted scrypt hashes. To change the admin login, set `ADMIN_LOGIN_HASH` and `ADMIN_PASSWORD_HASH` in the host's environment (make them with `node -e "const c=require('crypto');const s=c.randomBytes(16).toString('hex');console.log(s+':'+c.scryptSync(process.argv[1],s,32).toString('hex'))" 'value'`).
+- Sessions are kept in memory, so a server restart (or Render waking from sleep) signs everyone out.
+
 ## How Solo works
 
 1. **Start meeting.** The phone says "This meeting will be recorded for digital records." Recording starts.

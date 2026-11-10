@@ -9,6 +9,7 @@ import path from 'node:path';
 import * as soniox from './soniox.js';
 import { buildResult } from './build.js';
 import { ROSTER, DEPARTMENTS, DOMAIN_TERMS } from './roster.js';
+import * as auth from './auth.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,13 +19,15 @@ const jobs = new Map();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
+app.set('trust proxy', 1); // Render runs behind a proxy: needed for secure cookies and real client addresses
 app.use(express.static(publicDir));
+auth.mount(app, express);
 
 app.get('/api/health', (req, res) => res.json({ ok: true, soniox: soniox.configured(), model: soniox.MODEL }));
-app.get('/api/roster', (req, res) => res.json({ people: ROSTER, departments: Object.keys(DEPARTMENTS) }));
+app.get('/api/roster', auth.requireUser, (req, res) => res.json({ people: ROSTER, departments: Object.keys(DEPARTMENTS) }));
 
 // Body = the raw audio file. Query: title, introEndMs, durationMs.
-app.post('/api/solo/jobs', express.raw({ type: () => true, limit: '500mb' }), (req, res) => {
+app.post('/api/solo/jobs', auth.requireUser, express.raw({ type: () => true, limit: '500mb' }), (req, res) => {
   if (!soniox.configured()) return res.status(503).json({ error: 'The server has no SONIOX_API_KEY. Add it to .env and restart.' });
   const buf = req.body;
   if (!buf || !buf.length) return res.status(400).json({ error: 'No audio received.' });
@@ -42,7 +45,7 @@ app.post('/api/solo/jobs', express.raw({ type: () => true, limit: '500mb' }), (r
   res.status(202).json({ id: job.id, status: job.status, step: job.step });
 });
 
-app.get('/api/solo/jobs/:id', (req, res) => {
+app.get('/api/solo/jobs/:id', auth.requireUser, (req, res) => {
   const job = jobs.get(req.params.id);
   if (!job) return res.status(404).json({ error: 'This job has expired or the server restarted. Send the recording again.' });
   const { id, status, step, error, result, title } = job;

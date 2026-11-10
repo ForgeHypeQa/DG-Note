@@ -273,7 +273,7 @@ function viewSolo(){
   }
   if(s.phase==='error') return capsheet(`<div class="eyebrow">Not sent yet</div><h1 class="lt">Try again</h1><p class="sub">${esc(s.title||'Untitled meeting')}</p>`,
     `<div class="warnbox">${esc(s.err)}</div>
-     <button class="cta" data-act="solo-retry">Try again</button>
+     ${/sign in/i.test(s.err)?`<button class="cta" data-act="sign-in-again">Sign in again</button>`:`<button class="cta" data-act="solo-retry">Try again</button>`}
      <button class="btn2" data-act="solo-save-audio">Save the audio file</button>
      <button class="btn2" data-act="solo-new">Back to Solo</button>`);
   if(s.phase==='review') return capsheet(
@@ -515,7 +515,11 @@ function render(){
 
 /* ================= actions ================= */
 const ACT={
- account(){sheet(`<div style="display:flex;gap:14px;align-items:center"><span class="av lg" style="--c:${DIR[ME].c};width:54px;height:54px;font-size:17px">AA</span><div><h3>Dr. Ahmed Al-Kuwari</h3><p style="margin:0">${DIR[ME].e}</p></div></div><p>Signed in on this phone. Reports are written in English for your organisation.</p><div class="stk"><button class="btnk" data-act="restart">Restart the demo</button><button class="btng" data-act="close">Close</button></div>`);},
+ account(){openAccount();},
+ 'sign-out'(){signOut();},
+ async 'adm-out'(el){await api('/api/admin/signout',{id:el.dataset.id});toast(esc(el.dataset.n)+' signed out');openAccount();},
+ async 'adm-en'(el){const on=el.dataset.on!=='1';await api('/api/admin/enable',{id:el.dataset.id,enabled:on});toast(esc(el.dataset.n)+(on?' switched on':' switched off'));openAccount();},
+ 'pw-eye'(){const i=$('#lgPw');i.type=i.type==='password'?'text':'password';},
  restart(){closeSheet();if(recording())return toast('End the Solo meeting first');fresh();render();window.scrollTo(0,0);toast('Demo restarted');},
  close(){closeSheet();},
  /* ---- solo ---- */
@@ -535,6 +539,7 @@ const ACT={
    const mid=REC.mid;s.phase='proc';s.step='save';render();
    await recStop();await DB.patch(mid,{state:'ended',durationSec:s.t,introEndMs:s.introEndMs}).catch(()=>{});
    processMeeting(mid);},
+ 'sign-in-again'(){showLogin('Sign in, then send the recording from the Solo tab.');},
  'solo-retry'(){const s=ST.solo;processMeeting(s.mid,s.mid?null:s.blob);},
  'solo-file'(){$('#fileIn').click();},
  'solo-save-audio'(){saveAudio(ST.solo.blob,audioName());},
@@ -601,9 +606,68 @@ const ACT={
 function saveAll(){$$('[data-ek]').forEach(saveEdit);}
 function openReport(id){ST.tab='reports';ST.rep.id=id;ST.rep.lang='en';ST.rep.edit=false;['r-dec','r-act','r-qs','r-ppl','r-tx','r-rec','r-hist'].forEach(k=>delete ST.open[k]);render();window.scrollTo(0,0);}
 const FORM={
+ async login(){
+   const btn=$('#lgBtn'),err=$('#lgErr');err.hidden=true;btn.disabled=true;btn.textContent='Signing in…';
+   try{const j=await api('/api/login',{login:$('#lgLogin').value,password:$('#lgPw').value});fresh();signedIn(j);toast('Welcome, '+esc(j.user.name)+' · '+j.online+' of '+j.max+' signed in');}
+   catch(e){err.textContent=e.message==='Failed to fetch'?'Cannot reach the server. Check the connection.':e.message;err.hidden=false;btn.disabled=false;btn.textContent='Sign in';}
+ },
  chat(f){const v=$('#chatIn').value.trim();if(!v)return;$('#chatIn').value='';addChat(ME,v);},
  q(f){const v=$('#qIn').value.trim();if(!v)return;$('#qIn').value='';addQ(ME,v);toast('Question posted for everyone');},
 };
+
+
+/* ================= sign-in ================= */
+let ME_USER=null;
+async function api(path,body){const r=await fetch(API+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const j=await r.json().catch(()=>({}));if(r.status===401&&path!=='/api/login'){showLogin('You were signed out. Please sign in again.');throw new Error(j.error||'Signed out');}if(!r.ok)throw Object.assign(new Error(j.error||('Error '+r.status)),{status:r.status,body:j});return j;}
+async function boot(){
+  try{const r=await fetch(API+'/api/me');if(r.ok){signedIn(await r.json());return;}}catch(e){}
+  showLogin();
+}
+function loginHTML(msg){
+  return `<div class="lhero"><span class="fh fh-xl" aria-label="ForgeHype"><span class="f">Forge</span><span class="h">Hype</span></span>
+     <div class="eyebrow" style="margin-top:44px">DG-Note</div><h1 class="lt">Sign in</h1><p class="sub">Meeting notes that know who spoke.</p></div>
+   <form class="lform" data-form="login" autocomplete="on">
+     ${msg?`<div class="warnbox">${esc(msg)}</div>`:''}
+     <label class="fld"><span>Email or guest name</span><input id="lgLogin" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="you@forgehype.qa or Guest 1" required></label>
+     <label class="fld"><span>Password</span><span class="pwrow"><input id="lgPw" name="password" type="password" autocomplete="current-password" required><button type="button" class="eye" data-act="pw-eye" aria-label="Show password">Show</button></span></label>
+     <div class="warnbox" id="lgErr" hidden></div>
+     <button class="cta" id="lgBtn">Sign in</button>
+     <p class="fine">Demo: up to 4 people can be signed in at the same time.</p>
+   </form>`;
+}
+function showLogin(msg){
+  ME_USER=null;closeSheet();$('#app').hidden=true;const L=$('#loginScreen');L.hidden=false;L.innerHTML=loginHTML(msg);
+  setTimeout(()=>{const i=$('#lgLogin');if(i&&matchMedia('(pointer:fine)').matches)i.focus();},50);
+}
+function signedIn(j){
+  ME_USER=j.user;$('#loginScreen').hidden=true;$('#loginScreen').innerHTML='';$('#app').hidden=false;
+  $('.me').textContent=j.user.short;$('.me').classList.toggle('adm',j.user.role==='admin');
+  render();loadServer();checkPending();
+}
+async function signOut(){
+  if(recording())return toast('End the Solo meeting first');
+  try{await fetch(API+'/api/logout',{method:'POST'});}catch(e){}
+  fresh();showLogin();
+}
+async function openAccount(){
+  const u=ME_USER;if(!u)return;
+  const head=`<div style="display:flex;gap:14px;align-items:center"><span class="av lg" style="--c:${u.role==='admin'?'#FF5D00':'#45D3C5'};width:54px;height:54px;font-size:16px">${esc(u.short)}</span><div><h3>${esc(u.name)}</h3><p style="margin:0">${u.role==='admin'?'Admin · full access':'Guest account'}</p></div></div>`;
+  const foot=`<div class="stk"><button class="btnk" data-act="sign-out">Sign out</button>${u.role==='admin'?'<button class="btng" data-act="restart">Reset the sample data</button>':''}<button class="btng" data-act="close">Close</button></div>`;
+  if(u.role!=='admin'){sheet(head+`<p>Signed in on this device. Your meetings stay on this phone until the database is connected.</p>`+foot);return;}
+  sheet(head+`<p id="admLoad">Loading who is online…</p>`+foot);
+  try{
+    const r=await fetch(API+'/api/admin/users');const j=await r.json();if(!r.ok)throw new Error(j.error);
+    const on=j.users.filter(x=>x.online).length,ago=t=>{const m=Math.round((Date.now()-t)/60000);return m<1?'now':m+' min ago';};
+    const rows=j.users.map(x=>`<div class="arow"><span class="dot ${x.online?'on':''}"></span><div class="grow"><b>${esc(x.name)}${x.role==='admin'?' <span class="tagp warn">Admin</span>':''}</b><small>${x.online?`${esc(x.device)} · signed in ${new Date(x.since).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} · active ${ago(x.lastSeen)}`:x.enabled?'Not signed in':'Switched off'}</small></div>
+      ${x.role==='admin'?'':`${x.online?`<button class="pillg" data-act="adm-out" data-id="${x.id}" data-n="${esc(x.name)}">Sign out</button>`:''}<button class="pillg ${x.enabled?'':'off'}" data-act="adm-en" data-id="${x.id}" data-n="${esc(x.name)}" data-on="${x.enabled?1:0}">${x.enabled?'On':'Off'}</button>`}</div>`).join('');
+    $('#admLoad').outerHTML=`<div class="sech" style="padding:18px 0 4px"><h2 style="font-size:17px">Online now</h2><span><b>${on}</b> of ${j.max}</span></div><div class="alist">${rows}</div><p style="font-size:13px">Guests sign in with Guest 1 to Guest 6. Switching a guest off signs them out and blocks them. You are never locked out: if the demo is full, the guest idle longest gives up their seat.</p>`;
+  }catch(e){const l=$('#admLoad');if(l)l.textContent=e.message;}
+}
+// heartbeat keeps your seat; 3 minutes without it frees the seat for someone else
+setInterval(async()=>{
+  if(!ME_USER)return;
+  try{const r=await fetch(API+'/api/me');if(r.status===401){if(recording()){toast('Signed out on the server. Recording continues on this phone; sign in again after ending.');return;}showLogin('You were signed out. Please sign in again.');}}catch(e){}
+},30000);
 
 /* ================= events ================= */
 document.addEventListener('click',e=>{
@@ -641,4 +705,4 @@ setInterval(()=>{
   if(ST.tab==='group'&&$('#gGrid')) $$('.tile').forEach(t=>t.classList.toggle('talk',t.id==='tile-'+g.talk));
 },2600);
 
-fresh(); render(); loadServer(); checkPending();
+fresh(); boot();
