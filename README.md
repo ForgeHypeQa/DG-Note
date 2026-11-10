@@ -32,7 +32,8 @@ On the computer, open http://localhost:3000 and use **Test with an audio file**,
 Browsers only allow the microphone over **https**. Easiest options:
 
 - **Tunnel (quick test):** `npx cloudflared tunnel --url http://localhost:3000` and open the https address it prints on the phone.
-- **Deploy:** any Node host (Render, Railway, Fly.io). Set `SONIOX_API_KEY` in the host's environment. Start command `npm start`.
+- **Render (recommended):** in Render choose New → Blueprint → this repo. It reads `render.yaml`, asks for `SONIOX_API_KEY`, and gives an https link like `https://dg-note.onrender.com`. The free plan sleeps when idle, so the first open takes about a minute.
+- **Other hosts:** any Node host (Render, Railway, Fly.io). Set `SONIOX_API_KEY` in the host's environment. Start command `npm start`.
 
 Keep the screen on during the meeting. The app asks the phone not to sleep, but a web page can stop recording if the browser is sent to the background. The native app (step 6) removes this limit.
 

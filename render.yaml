@@ -1,0 +1,15 @@
+# Render deployment (https://render.com): New > Blueprint > pick this repo.
+services:
+  - type: web
+    name: dg-note
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: SONIOX_API_KEY
+        sync: false
+      - key: NODE_VERSION
+        value: "22"
