@@ -373,21 +373,33 @@ function relabel(r){
 function saveSoloSpeakers(){const s=ST.solo,r=ST.reports.find(x=>x.id===s.rid);if(r){r.speakers=s.speakers.map(({open,...y})=>y);saveReport(r);}}
 // Arabic version of a report: minutes + transcript translated in one go, kept with the report.
 // Lines first said in Arabic are not translated back: the original is used.
+// Arabic version of a report, in two steps so it shows quickly:
+//   1. the report itself (summary, discussion, decisions, actions, questions): a few seconds
+//   2. the transcript, which can be long: shown as soon as it arrives
+// Lines first said in Arabic are not translated back: the original is used. Kept with the report.
 async function translateReport(r,target){
-  if(ST.rep.translating)return;ST.rep.translating=true;render();
+  if(ST.rep.translating)return;ST.rep.translating=true;if(curRep()===r)render();
+  const v=r.v||0;
   try{
-    const items=[],put=[];const add=(txt,set)=>{items.push(txt||'');put.push(set);};
-    const out={v:r.v||0,sum:[],dec:[],act:[],qs:[],topics:[],tx:[]};
+    const out={v,sum:[],dec:[],act:[],qs:[],topics:[],tx:[],txDone:false};
+    // step 1: the report
+    let items=[],put=[];const add=(txt,set)=>{items.push(txt||'');put.push(set);};
     r.sum.forEach((x,i)=>add(r.ed['s'+i]??plain(r,x),t=>out.sum[i]=t));
     r.dec.forEach((x,i)=>add(r.ed['d'+i]??plain(r,x),t=>out.dec[i]=t));
     r.act.forEach((a,i)=>{out.act[i]={t:'',due:''};add(r.ed['a'+i]??plain(r,a.t),t=>out.act[i].t=t);add(a.due||'',t=>out.act[i].due=t);});
     r.qs.forEach((q,i)=>add(q.t,t=>out.qs[i]=t));
     (r.topics||[]).forEach((x,i)=>{out.topics[i]={topic:'',notes:''};add(x.topic,t=>out.topics[i].topic=t);add(x.notes||'',t=>out.topics[i].notes=t);});
-    r.tx.forEach((l,i)=>{const isAr=l.o&&/[\u0600-\u06FF]/.test(l.o);if(isAr&&r.ed['t'+i]==null){out.tx[i]=l.o;return;}add(r.ed['t'+i]??plain(r,l.s),t=>out.tx[i]=t);});
-    const j=await api('/api/translate',{target,items});
-    j.items.forEach((t,k)=>put[k](t));
-    r.tr[target]=out;saveReport(r);
-  }catch(e){toast(esc(e.message));ST.rep.lang='en';}
+    if(items.length){const j=await api('/api/translate',{target,items});j.items.forEach((t,k)=>put[k](t));}
+    r.tr[target]=out;if(curRep()===r&&ST.rep.lang===target)render();
+    // step 2: the transcript
+    items=[];put=[];
+    r.tx.forEach((l,i)=>{const isAr=l.o&&/[؀-ۿ]/.test(l.o);if(isAr&&r.ed['t'+i]==null){out.tx[i]=l.o;return;}add(r.ed['t'+i]??plain(r,l.s),t=>out.tx[i]=t);});
+    if(items.length){const j=await api('/api/translate',{target,items});j.items.forEach((t,k)=>put[k](t));}
+    out.txDone=true;r.tr[target]=out;saveReport(r);
+  }catch(e){
+    if(!r.tr[target]||r.tr[target].v!==v){ST.rep.lang='en';}
+    sheet(`<h3>The Arabic version could not be made</h3><p>${esc(e.message)}</p><div class="stk"><button class="btnk" data-act="close">OK</button></div>`);
+  }
   ST.rep.translating=false;if(curRep()===r)render();
 }
 // Writes the meeting report (minutes) from the checked transcript. Uses the names, corrections and edits.
@@ -586,13 +598,16 @@ function viewReports(){
 function repDetail(r){
   const lang=ST.rep.lang, L=LBL[lang]||LBL.en, rtl=lang==='ar', ed=ST.rep.edit&&lang==='en'&&r.status==='draft';
   // Real reports: Arabic comes from a translation made on demand and kept with the report (redone after edits).
-  const tr=lang==='en'||lang==='orig'?null:r.real?(r.tr[lang]&&r.tr[lang].v===(r.v||0)?r.tr[lang]:null):r.tr[lang];
+  const tr=lang==='en'||lang==='orig'?null:r.real?(r.tr[lang]&&r.tr[lang].v===(r.v||0)&&(r.tr[lang].txDone||ST.rep.translating)?r.tr[lang]:null):r.tr[lang];
   if(r.real&&lang==='ar'&&!tr&&!ST.rep.translating)setTimeout(()=>translateReport(r,'ar'),0);
   const E=(key,list)=>ed?`data-ek="${key}" data-list="${list}" contenteditable="true"`:'';
   const txt=(key,src,trTxt)=> (tr&&r.ed[key]==null&&trTxt!=null)?esc(trTxt):rt(r,key,src);
   const added=list=>r.add[list].map(a=>`<li>${a.done?`<span>${esc(a.fixed)}<span class="tagfix">Dictated</span></span>`:'<span class="rawd" id="dictLive"></span>'}</li>`).join('');
   const n=unsure(r), who=p=>r.people[p]||{n:'Unassigned',c:'#D5D2D0',d:''};
   const mins=r.real?(r.minutes||'none'):'done';
+  if(r.real&&lang==='ar'&&!tr)return capsheet(`<div class="bar"><button class="back" data-act="rep-back">${I('back')}Reports</button><span class="grow"></span><span class="lseg" role="group" aria-label="Language">${[['en','EN','English'],['ar','AR','Arabic'],['orig','Orig','As spoken']].map(([k,t,a])=>`<button class="${lang===k?'on':''}" data-act="rep-l" data-l="${k}" aria-label="${a}">${t}</button>`).join('')}</span></div>
+      <h1 class="mt">${esc(r.title)}</h1><div class="writing"><span class="gdots"><i></i><i></i><i></i></span>Translating the report into Arabic…</div>`,
+    `<p class="fine">The report comes first, in a few seconds. The transcript follows. Tap EN to go back.</p>`);
   const cap=`<div class="bar"><button class="back" data-act="rep-back">${I('back')}Reports</button><span class="grow"></span>
       ${r.real?`<span class="lseg" role="group" aria-label="Language">${[['en','EN','English'],['ar','AR','Arabic'],['orig','Orig','As spoken']].map(([k,t,a])=>`<button class="${lang===k?'on':''}" data-act="rep-l" data-l="${k}" aria-label="${a}" title="${a}">${t}</button>`).join('')}</span>`
         :Object.keys(r.tr).length?`<button class="pillb" data-act="rep-lang">${I('globe','s')}${LANG[lang].name}</button>`:''}
@@ -611,7 +626,7 @@ function repDetail(r){
   const act=r.act.map((a,i)=>{const p=who(a.p),t=tr&&tr.act[i];return `<div class="act"><div class="at ${rtl?'rtl':''}" ${rtl?'dir="rtl" lang="ar"':''} ${E('a'+i,'act')}>${txt('a'+i,a.t,t&&t.t)}</div><div class="am"><span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span><span>${esc((t?t.due:a.due)||'No date')}</span></div></div>`;}).join('');
   const qs=r.qs.map((q,i)=>{const p=who(q.p),t=tr&&tr.qs[i];return `<div class="act"><div class="at" ${rtl&&t?'dir="rtl" lang="ar"':''}>${esc(t||q.t)}</div><div class="am"><span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span><span>Open</span></div></div>`;}).join('');
   const ppl=`<p class="note" style="margin-bottom:8px">${r.real?'Named from the introductions. Anyone who didn’t introduce themselves is listed as Speaker 1, 2… Tap a person to change the name.':r.kind==='solo'?'Named from the voice introductions at the start.':'Named from each person’s login on their own phone.'} ${r.status==='sent'?'Emailed '+esc(r.sentAt)+'.':'The report is emailed to everyone listed.'}</p>`+r.people.map((p,k)=>`<${r.real?`button data-act="rep-person" data-p="${k}"`:'div'} class="prow ${r.real?'tap':''}"><span class="av lg" style="--c:${p.c}">${ini(p.n)}</span><div class="grow"><b dir="auto">${esc(p.n)}</b>${[p.r,p.d,p.o].filter(Boolean).length?`<small dir="auto">${esc([p.r,p.d,p.o].filter(Boolean).join(' · '))}</small>`:''}${p.e||p.ph?`<small>${[p.e,p.ph].filter(Boolean).map(esc).join(' · ')}</small>`:''}${r.real&&!p.e?`<span class="addmail" data-act="rep-person" data-p="${k}" data-focus="email">+ Add email</span>`:(!r.real&&!p.e?'<small>No email on file</small>':'')}</div>${r.real?I('fwd','s'):''}</${r.real?'button':'div'}>`).join('');
-  const tx=`<p class="note">${lang==='orig'?'Exactly as spoken, in the original languages, with your edits. ':lang==='ar'&&r.real?'Shown in Arabic. Lines first said in Arabic are shown as spoken. ':r.real?(onlyEnglish(r)?'':'Anything not said in English is shown in English, with the original underneath. '):'Clean transcript: grammar fixed and filler words removed. '}${lang==='orig'||lang==='ar'?'':lang!=='en'?'Shown in English with the original words underneath.':n?'Orange words were unclear in the audio. Tap one to check it.':'Tap a name to change who said it.'}</p>`+r.tx.map((l,i)=>{const p=who(l.p);return `<div class="txl"><div class="th">${r.real?`<button class="sp" style="--c:${p.c}" data-act="rep-person" data-p="${l.p}" aria-label="Rename ${esc(p.n)}">${esc(first(p.n))}</button>`:`<span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span>`}<span>${l.t}</span></div>${(()=>{
+  const tx=`<p class="note">${lang==='orig'?'Exactly as spoken, in the original languages, with your edits. ':lang==='ar'&&r.real?(tr&&!tr.txDone?'Translating the transcript… lines show in English until it is ready. ':'Shown in Arabic. Lines first said in Arabic are shown as spoken. '):r.real?(onlyEnglish(r)?'':'Anything not said in English is shown in English, with the original underneath. '):'Clean transcript: grammar fixed and filler words removed. '}${lang==='orig'||lang==='ar'?'':lang!=='en'?'Shown in English with the original words underneath.':n?'Orange words were unclear in the audio. Tap one to check it.':'Tap a name to change who said it.'}</p>`+r.tx.map((l,i)=>{const p=who(l.p);return `<div class="txl"><div class="th">${r.real?`<button class="sp" style="--c:${p.c}" data-act="rep-person" data-p="${l.p}" aria-label="Rename ${esc(p.n)}">${esc(first(p.n))}</button>`:`<span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span>`}<span>${l.t}</span></div>${(()=>{
       const isAr=l.o&&/[\u0600-\u06FF]/.test(l.o);
       if(lang==='orig')return `<div class="tt" dir="auto"${isAr?' lang="ar"':''}>${l.o?esc(l.o):rt(r,'t'+i,l.s)}</div>`;
       if(lang==='ar'&&r.real)return `<div class="tt" dir="rtl" lang="ar">${esc(isAr&&r.ed['t'+i]==null?l.o:(tr&&tr.tx&&tr.tx[i])||plain(r,l.s))}</div>`;
@@ -624,8 +639,7 @@ function repDetail(r){
     :r.status==='sent'?`<span class="sentl">${I('check','s')}${r.real?'Approved':'Sent to '+r.people.filter(p=>p.e).length+' people'}</span><button class="dbt ic" data-act="rep-copy" aria-label="Copy summary">${I('copy','s')}</button>`
     :`<button class="dbt ic" data-act="rep-copy" aria-label="Copy summary">${I('copy','s')}</button><button class="dbt acc" data-act="rep-send">Approve &amp; send</button>`;
   return capsheet(cap,
-    `${ST.rep.translating?`<div class="writing light"><span class="gdots"><i></i><i></i><i></i></span>Translating into Arabic…</div>`:''}
-     ${r.real&&lang==='orig'?`<p class="note">Transcript as spoken. The report itself is written in English. <button data-act="rep-en" style="font-weight:700;color:var(--accink)">Back to English</button></p>`:''}
+    `${r.real&&lang==='orig'?`<p class="note">Transcript as spoken. The report itself is written in English. <button data-act="rep-en" style="font-weight:700;color:var(--accink)">Back to English</button></p>`:''}
      ${lang!=='en'&&lang!=='orig'&&tr?`<p class="note">Translated from English by AI. The English original is kept. <button data-act="rep-en" style="font-weight:700;color:var(--accink)">Show original</button></p>`:''}
      ${ed&&r.real?`<p class="note">Tap any transcript line to change it. Changes are saved in the change history.</p>`:ed?`<p class="note">Tap any text to change it, or use Dictate. Dictated words are cleaned up for grammar and spelling.</p>`:''}
      ${(r.topics||[]).length?drawer('r-top',lang==='ar'?'النقاش':'Discussion',r.topics.length,topics,true):''}

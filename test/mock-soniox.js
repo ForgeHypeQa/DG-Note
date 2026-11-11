@@ -59,7 +59,8 @@ app.post('/v1/messages', express.json({ limit: '5mb' }), (req, res) => {
   console.log('[mock] claude model', req.body.model);
   if (/You translate/.test(req.body.system || '')) {
     const items = JSON.parse(user).items;
-    return res.json({ content: [{ type: 'text', text: JSON.stringify({ items: items.map(t => t ? 'بالعربية: ' + t : '') }) }] });
+    const reply = () => res.json({ content: [{ type: 'text', text: JSON.stringify({ items: items.map(t => t ? 'بالعربية: ' + t : '') }) }] });
+    return setTimeout(reply, Number(process.env.MOCK_DELAY || 0));   // MOCK_DELAY=ms to test slow translation
   }
   res.json({ content: [{ type: 'text', text: minutesFor(user) }] });
 });
