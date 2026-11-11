@@ -65,7 +65,13 @@ function minutesFor(text) {
 }
 // Stand-in for Anthropic (Messages API shape).
 app.post('/v1/messages', express.json({ limit: '5mb' }), (req, res) => {
-  res.json({ content: [{ type: 'text', text: minutesFor(req.body.messages?.[0]?.content || '') }] });
+  const user = req.body.messages?.[0]?.content || '';
+  console.log('[mock] claude model', req.body.model);
+  if (/You translate/.test(req.body.system || '')) {
+    const items = JSON.parse(user).items;
+    return res.json({ content: [{ type: 'text', text: JSON.stringify({ items: items.map(t => t ? 'بالعربية: ' + t : '') }) }] });
+  }
+  res.json({ content: [{ type: 'text', text: minutesFor(user) }] });
 });
 
 app.post('/v1/files', express.raw({ type: () => true, limit: '500mb' }), (req, res) => {

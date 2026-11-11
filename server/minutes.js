@@ -31,7 +31,7 @@ const arr = (x, f) => Array.isArray(x) ? x.map(f).filter(Boolean) : [];
 const str = x => (typeof x === 'string' ? x.trim() : '');
 
 export async function writeMinutes(meeting) {
-  const out = await llm.askJSON(SYSTEM, transcriptText(meeting), 4000);
+  const out = await llm.askJSON(SYSTEM, transcriptText(meeting), 4000, 'report');
   return {
     title: str(out.title),
     summary: arr(out.summary, str),
@@ -55,7 +55,7 @@ export async function translate(items, target) {
   if (cur.length) batches.push(cur);
   const run = async b => {
     for (let attempt = 0; attempt < 2; attempt++) {
-      const out = await llm.askJSON(T_SYSTEM(target), JSON.stringify({ items: b }), 8000);
+      const out = await llm.askJSON(T_SYSTEM(target), JSON.stringify({ items: b }), 8000, 'translate');
       if (Array.isArray(out.items) && out.items.length === b.length) return out.items.map(x => String(x ?? ''));
     }
     throw new Error('translation: wrong number of items');
