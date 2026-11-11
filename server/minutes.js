@@ -3,7 +3,9 @@
 // Claude (see llm.js). Shown to users only as "ForgeHype Meet".
 import * as llm from './llm.js';
 export const configured = llm.configured;
-const SYSTEM = `You are the minute-taker for ForgeHype Meet. You turn a meeting transcript into clear, professional meeting minutes in English.
+import { clean, KINDS } from './templates.js';
+
+const RULES = `You are the minute-taker for ForgeHype Meet. You turn a meeting transcript into clear, professional meeting minutes in English.
 Rules:
 - Use only what is in the transcript. Never invent facts, names, numbers, dates or decisions.
 - Write in plain, short English sentences. No filler, no opinions.
@@ -11,15 +13,32 @@ Rules:
 - Decisions: only things the group actually agreed or decided.
 - Action items: concrete tasks someone will do. Owner must be one attendee name exactly as listed, or "" if nobody was named. Due: the deadline as said ("Today", "Thursday", "next week"), or "".
 - Open questions: questions raised and not answered in the meeting.
-- If the transcript is too short or has no real content for a section, return an empty list for it.
+- If the transcript has no real content for a section, return an empty list (or "" for a paragraph).
 - Translate anything not in English into English.
-Return ONLY a JSON object, no other text, with exactly these keys:
+- Follow the report template below exactly: its sections, their order and each section's instruction.`;
+
+const SHAPE = {
+  summary: '[string, ...]', decisions: '[string, ...]', bullets: '[string, ...]', text: 'string',
+  discussion: '[{"topic": string, "notes": string}, ...]',
+  actions: '[{"owner": string, "task": string, "due": string}, ...]',
+  questions: '[{"by": string, "question": string}, ...]',
+};
+
+function systemFor(t) {
+  const secs = t.sections.map((x, i) => `s${i + 1}. "${x.title}" (${x.kind})${x.guide ? ': ' + x.guide : ''}`).join('\n');
+  const shape = t.sections.map((x, i) => `  "s${i + 1}": ${SHAPE[x.kind]}`).join(',\n');
+  return `${RULES}
+
+REPORT TEMPLATE: ${t.name}
+Sections, in order:
+${secs}
+${t.style ? `\nStyle: ${t.style}\n` : ''}${t.example ? `\nREFERENCE REPORT. Copy its structure, wording style and level of detail. Never copy its facts, names or numbers:\n"""\n${t.example}\n"""\n` : ''}
+Return ONLY a JSON object, no other text:
 {"title": string (a short, specific meeting title, max 8 words),
- "summary": [string, ...] (3 to 5 bullet points, the meeting "in 30 seconds"),
- "topics": [{"topic": string, "notes": string}, ...] (what was discussed, in order, each notes 1-3 sentences),
- "decisions": [string, ...],
- "actions": [{"owner": string, "task": string, "due": string}, ...],
- "questions": [{"by": string, "question": string}, ...]}`;
+ "sections": {
+${shape}
+ }}`;
+}
 
 function transcriptText(m) {
   const who = m.people.map(p => `- ${p.name}${[p.role, p.dept, p.org].filter(Boolean).length ? ' (' + [p.role, p.dept, p.org].filter(Boolean).join(', ') + ')' : ''}`).join('\n');
@@ -29,17 +48,48 @@ function transcriptText(m) {
 
 const arr = (x, f) => Array.isArray(x) ? x.map(f).filter(Boolean) : [];
 const str = x => (typeof x === 'string' ? x.trim() : '');
+const PARSE = {
+  summary: x => arr(x, str), decisions: x => arr(x, str), bullets: x => arr(x, str), text: x => str(x),
+  discussion: x => arr(x, t => str(t?.topic) && { topic: str(t.topic), notes: str(t.notes) }),
+  actions: x => arr(x, a => str(a?.task) && { owner: str(a.owner), task: str(a.task), due: str(a.due) }),
+  questions: x => arr(x, q => str(q?.question) && { by: str(q.by), question: str(q.question) }),
+};
+// The first section of each main kind fills the report's standard parts (so owners, editing and
+// sending keep working); every other section is an extra section. `layout` keeps the template order.
+const FIELD = { summary: 'summary', discussion: 'topics', decisions: 'decisions', actions: 'actions', questions: 'questions' };
 
-export async function writeMinutes(meeting) {
-  const out = await llm.askJSON(SYSTEM, transcriptText(meeting), 4000, 'report');
-  return {
-    title: str(out.title),
-    summary: arr(out.summary, str),
-    topics: arr(out.topics, t => str(t?.topic) && { topic: str(t.topic), notes: str(t.notes) }),
-    decisions: arr(out.decisions, str),
-    actions: arr(out.actions, a => str(a?.task) && { owner: str(a.owner), task: str(a.task), due: str(a.due) }),
-    questions: arr(out.questions, q => str(q?.question) && { by: str(q.by), question: str(q.question) }),
-  };
+export async function writeMinutes(meeting, template) {
+  const t = clean(template);
+  const out = await llm.askJSON(systemFor(t), transcriptText(meeting), 6000, 'report');
+  const secs = out.sections || {};
+  const res = { title: str(out.title), summary: [], topics: [], decisions: [], actions: [], questions: [], extra: [], layout: [], template: { id: t.id, name: t.name } };
+  const used = new Set();
+  t.sections.forEach((x, i) => {
+    const key = `s${i + 1}`, val = PARSE[x.kind](secs[key]);
+    const field = FIELD[x.kind];
+    if (field && !used.has(field)) { used.add(field); res[field] = val; res.layout.push({ key, title: x.title, kind: x.kind, field }); }
+    else { res.extra.push({ key, title: x.title, kind: x.kind, items: Array.isArray(val) ? val : [], text: typeof val === 'string' ? val : '' }); res.layout.push({ key, title: x.title, kind: x.kind, field: 'extra' }); }
+  });
+  return res;
+}
+
+/* ---------- a template from an example report ---------- */
+const FROM_EXAMPLE = `You design meeting-report templates for ForgeHype Meet.
+You receive an example meeting report. Describe its structure as a reusable template: the sections in order,
+what kind each section is, and a one-sentence instruction for writing it. Also describe its writing style in one or two sentences.
+Section kinds: ${KINDS.join(', ')}.
+- summary: short bullet overview at the top; discussion: topics with notes; decisions: what was agreed;
+  actions: tasks with owner and due date; questions: open questions; bullets: any other list; text: a short paragraph.
+- Use the example's own section headings (in English) as titles. Leave out the attendance list, dates and signatures: the app adds those itself.
+Return ONLY JSON: {"name": string (max 5 words), "sections": [{"title": string, "kind": string, "guide": string}, ...], "style": string}`;
+
+export async function templateFromExample({ text, pdfBase64 }) {
+  const content = pdfBase64
+    ? [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 } }, { type: 'text', text: 'Turn this example report into a template.' }]
+    : `Example report:\n"""\n${String(text || '').slice(0, 20000)}\n"""`;
+  const out = await llm.askJSON(FROM_EXAMPLE, content, 3000, 'report');
+  const t = clean({ name: out.name, sections: out.sections, style: out.style });
+  return { name: t.name, sections: t.sections, style: t.style };
 }
 
 /* ---------- translation ---------- */

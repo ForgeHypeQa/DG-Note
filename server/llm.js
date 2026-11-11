@@ -35,5 +35,5 @@ export function parseJSON(text) {
 
 export async function askJSON(system, user, maxTokens = 4000, kind = 'report') {
   try { return parseJSON(await ask(system, user, maxTokens, kind)); }
-  catch (e) { if (e.status) throw e; return parseJSON(await ask(system, user + '\n\nReturn valid JSON only.', maxTokens, kind)); }   // one retry on bad JSON
+  catch (e) { if (e.status) throw e; return parseJSON(await ask(system + '\n\nReturn valid JSON only.', user, maxTokens, kind)); }   // one retry on bad JSON
 }

@@ -13,6 +13,7 @@ import * as auth from './auth.js';
 import { splitParts, joinParts } from './audio.js';
 import * as minutes from './minutes.js';
 import * as llm from './llm.js';
+import { BUILT_IN } from './templates.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -118,8 +119,20 @@ app.post('/api/report', auth.requireUser, express.json({ limit: '3mb' }), async 
   if (!minutes.configured()) return res.status(503).json({ error: 'Meeting reports are not switched on for this server yet. Ask the admin.' });
   const m = req.body || {};
   if (!Array.isArray(m.segments) || !m.segments.length) return res.status(400).json({ error: 'There is no transcript to write a report from.' });
-  try { res.json(await minutes.writeMinutes(m)); }
+  try { res.json(await minutes.writeMinutes(m, m.template)); }
   catch (e) { console.error('[report]', e.message); res.status(502).json({ error: textError(e, 'The report could not be written. Try again.', req.user) }); }
+});
+
+// Report templates: the built-in ones (custom templates are kept on each phone for now).
+app.get('/api/templates', auth.requireUser, (req, res) => res.json({ templates: BUILT_IN }));
+
+// Make a template from an example report. Body: { text } or { pdf: base64 }. Nothing is stored.
+app.post('/api/templates/from-example', auth.requireUser, express.json({ limit: '15mb' }), async (req, res) => {
+  if (!minutes.configured()) return res.status(503).json({ error: 'Meeting reports are not switched on for this server yet. Ask the admin.' });
+  const { text, pdf } = req.body || {};
+  if (!text && !pdf) return res.status(400).json({ error: 'Paste an example report or choose a PDF.' });
+  try { res.json(await minutes.templateFromExample({ text, pdfBase64: pdf })); }
+  catch (e) { console.error('[template]', e.message); res.status(502).json({ error: textError(e, 'The template could not be made from this example. Try again.', req.user) }); }
 });
 
 // Translation of a report and transcript. Body: { target: 'ar'|'en', items: [string] }

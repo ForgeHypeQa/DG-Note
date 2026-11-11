@@ -132,10 +132,11 @@ const rosterBy=n=>ROSTER.find(p=>p.name.toLowerCase()===String(n).trim().toLower
 //   chunks:   the audio, saved every 5 s while recording (part = a new piece after the phone stopped recording)
 //   reports:  finished transcripts with names, edits, change history and the audio
 const DB={db:null,
-  open(){return this.db||(this.db=new Promise((res,rej)=>{const q=indexedDB.open('dg-note',2);q.onupgradeneeded=()=>{const d=q.result;
+  open(){return this.db||(this.db=new Promise((res,rej)=>{const q=indexedDB.open('dg-note',3);q.onupgradeneeded=()=>{const d=q.result;
     if(!d.objectStoreNames.contains('meetings'))d.createObjectStore('meetings',{keyPath:'mid'});
     if(!d.objectStoreNames.contains('chunks'))d.createObjectStore('chunks',{keyPath:['mid','i']});
-    if(!d.objectStoreNames.contains('reports'))d.createObjectStore('reports',{keyPath:'id'});};
+    if(!d.objectStoreNames.contains('reports'))d.createObjectStore('reports',{keyPath:'id'});
+    if(!d.objectStoreNames.contains('templates'))d.createObjectStore('templates',{keyPath:'id'});};
     q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);}));},
   async run(store,mode,fn){const d=await this.open();return new Promise((res,rej)=>{const t=d.transaction(store,mode);const q=fn(t.objectStore(store));t.oncomplete=()=>res(q&&'result' in q?q.result:undefined);t.onerror=()=>rej(t.error);});},
   put(store,v){return this.run(store,'readwrite',s=>s.put(v));},
@@ -373,6 +374,73 @@ function relabel(r){
 function saveSoloSpeakers(){const s=ST.solo,r=ST.reports.find(x=>x.id===s.rid);if(r){r.speakers=s.speakers.map(({open,...y})=>y);saveReport(r);}}
 // Arabic version of a report: minutes + transcript translated in one go, kept with the report.
 // Lines first said in Arabic are not translated back: the original is used.
+/* ================= report templates ================= */
+// A template sets the sections, order and style of a report. Built-in ones come from the server;
+// your own are kept on this phone (until the database is connected). The default is used for new reports.
+let TEMPLATES=[];
+const KIND_LABEL={summary:'Summary at the top',discussion:'Discussion topics',decisions:'Decisions',actions:'Action items (owner, due)',questions:'Open questions',bullets:'List',text:'Paragraph'};
+const tplKey=()=>'dg-default-tpl-'+(ME_USER?.id||'x');
+function getDefaultTplId(){try{return localStorage.getItem(tplKey())||'standard';}catch(e){return 'standard';}}
+function setDefaultTplId(id){try{localStorage.setItem(tplKey(),id);}catch(e){}}
+async function loadTemplates(){
+  try{const r=await fetch(API+'/api/templates');if(r.ok)TEMPLATES=(await r.json()).templates||[];}catch(e){}
+  try{ST.myTemplates=(await DB.all('templates')||[]).filter(t=>t.owner===ME_USER?.id).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));}catch(e){ST.myTemplates=[];}
+}
+const allTemplates=()=>[...(TEMPLATES.length?TEMPLATES:[{id:'standard',name:'Standard minutes',builtIn:true,sections:[],description:'Summary, discussion, decisions, actions and open questions.'}]),...(ST.myTemplates||[])];
+const tplById=id=>allTemplates().find(t=>t.id===id)||allTemplates()[0];
+const tplPayload=t=>t.builtIn?{id:t.id}:{id:t.id,name:t.name,sections:t.sections,style:t.style||'',example:t.example||''};
+
+function openTemplates(forReport){
+  ST.tplFor=forReport||null;
+  const def=getDefaultTplId(),r=forReport?ST.reports.find(x=>x.id===forReport):null,cur=r?(r.templateId||def):def;
+  const rows=allTemplates().map(t=>`<div class="tplrow ${t.id===cur?'on':''}">
+     <button class="tplpick" data-act="${r?'tpl-use':'tpl-open'}" data-id="${esc(t.id)}"><b>${esc(t.name)}</b><small>${esc(t.description||t.sections.map(x=>x.title).join(' · '))}</small>
+       <span class="tplbadges">${t.id===def?'<span class="tagp ok">Default</span>':''}${t.builtIn?'':'<span class="tagp mute">Yours</span>'}${r&&t.id===cur?'<span class="tagp warn">Used now</span>':''}</span></button>
+     ${r?`<button class="pillg" data-act="tpl-open" data-id="${esc(t.id)}">View</button>`:''}</div>`).join('');
+  sheet(`<h3>${r?'Write this report with…':'Report templates'}</h3>
+    <p>${r?'Pick a template. The report is written again in its sections and style, from the same transcript.':'A template sets the sections, their order and the writing style. The default is used for every new report.'}</p>
+    <div class="tpllist">${rows}</div>
+    <div class="stk"><button class="btng" data-act="tpl-new">+ New template</button><button class="btng" data-act="tpl-example">Make one from an example report</button><button class="btng" data-act="close">Close</button></div>`);
+}
+function openTplEditor(t,isNew){
+  ST.tplEdit=JSON.parse(JSON.stringify({id:t.id||'',name:t.name||'',sections:t.sections||[],style:t.style||'',example:t.example||'',builtIn:!!t.builtIn,description:t.description||'',isNew:!!isNew}));
+  renderTplEditor();
+}
+function renderTplEditor(){
+  const t=ST.tplEdit,ro=t.builtIn,def=!t.isNew&&getDefaultTplId()===t.id;
+  const secs=t.sections.map((x,i)=>`<div class="tsec" data-i="${i}">
+     <div class="tsec-h"><span class="tnum">${i+1}</span>${ro?`<b class="grow">${esc(x.title)}</b>`:`<input class="ts-title grow" value="${esc(x.title)}" placeholder="Section heading" aria-label="Section ${i+1} heading">
+       <button class="ticon" data-act="tsec-up" data-i="${i}" aria-label="Move up" ${i?'':'disabled'}>↑</button><button class="ticon" data-act="tsec-down" data-i="${i}" aria-label="Move down" ${i<t.sections.length-1?'':'disabled'}>↓</button><button class="ticon" data-act="tsec-del" data-i="${i}" aria-label="Remove section">×</button>`}</div>
+     ${ro?`<small>${esc(KIND_LABEL[x.kind]||x.kind)}${x.guide?' · '+esc(x.guide):''}</small>`
+       :`<select class="ts-kind" aria-label="Section type">${Object.entries(KIND_LABEL).map(([k,l])=>`<option value="${k}" ${x.kind===k?'selected':''}>${l}</option>`).join('')}</select>
+         <textarea class="ts-guide" rows="2" placeholder="How to write this section (optional)">${esc(x.guide||'')}</textarea>`}</div>`).join('');
+  sheet(`<h3>${ro?esc(t.name):t.isNew?'New template':'Edit template'}</h3>${ro?`<p>${esc(t.description||'Built-in template.')} Copy it to make your own version.</p>`:''}
+    <div class="stk">
+      ${ro?'':`<label class="fld"><span>Template name</span><input id="tplName" value="${esc(t.name)}" placeholder="e.g. Ward round report"></label><b style="font-size:14px;margin:6px 0 -4px">Sections, in order</b>`}
+      <div class="tsecs">${secs}</div>
+      ${ro?'':`<button class="btng" data-act="tsec-add">+ Add section</button>`}
+      ${ro?(t.style?`<p style="font-size:14px;margin:0"><b>Style:</b> ${esc(t.style)}</p>`:'')
+        :`<label class="fld"><span>Style notes (optional)</span><textarea id="tplStyle" rows="2" placeholder="e.g. Formal, third person, past tense.">${esc(t.style)}</textarea></label>
+          <label class="fld"><span>Reference report (optional)</span><textarea id="tplExample" rows="4" placeholder="Paste a report written the way you like. Its structure and style are copied, never its facts.">${esc(t.example)}</textarea></label>`}
+      ${ro?`<button class="btnk" data-act="tpl-copy">Copy and edit</button>`:`<button class="btnk" data-act="tpl-save">Save template</button>`}
+      ${def?'<p style="font-size:13px;margin:0">This is your default template for new reports.</p>':ro||!t.isNew?`<button class="btng" data-act="tpl-default">Use for new reports</button>`:''}
+      ${!ro&&!t.isNew?`<button class="btng" data-act="tpl-del" style="color:#C42B1C">Delete template</button>`:''}
+      <button class="btng" data-act="tpl-back">Back</button></div>`);
+}
+function syncTplEditor(){
+  const t=ST.tplEdit;if(!t||t.builtIn)return;const n=$('#tplName');if(n)t.name=n.value;
+  $$('.tsec').forEach(el=>{const x=t.sections[+el.dataset.i];if(!x)return;x.title=el.querySelector('.ts-title').value;x.kind=el.querySelector('.ts-kind').value;x.guide=el.querySelector('.ts-guide').value;});
+  const st=$('#tplStyle');if(st)t.style=st.value;const ex=$('#tplExample');if(ex)t.example=ex.value;
+}
+function openTplExample(){
+  ST.tplPdf=null;
+  sheet(`<h3>Make a template from an example</h3><p>Paste a report you like, or choose it as a PDF. ForgeHype Meet reads its sections and style and turns them into a template you can edit.</p>
+    <div class="stk"><label class="fld"><span>Example report</span><textarea id="exText" rows="7" placeholder="Paste the example report here"></textarea></label>
+      <button class="btng" data-act="tpl-file">Choose a PDF or text file</button><p id="exFile" style="font-size:13px;margin:0"></p>
+      <button class="btnk" id="exGo" data-act="tpl-make">Make the template</button><button class="btng" data-act="tpl-back">Back</button></div>`);
+}
+const fileToBase64=f=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=()=>rej(r.error);r.readAsDataURL(f);});
+
 // Arabic version of a report, in two steps so it shows quickly:
 //   1. the report itself (summary, discussion, decisions, actions, questions): a few seconds
 //   2. the transcript, which can be long: shown as soon as it arrives
@@ -389,6 +457,9 @@ async function translateReport(r,target){
     r.act.forEach((a,i)=>{out.act[i]={t:'',due:''};add(r.ed['a'+i]??plain(r,a.t),t=>out.act[i].t=t);add(a.due||'',t=>out.act[i].due=t);});
     r.qs.forEach((q,i)=>add(q.t,t=>out.qs[i]=t));
     (r.topics||[]).forEach((x,i)=>{out.topics[i]={topic:'',notes:''};add(x.topic,t=>out.topics[i].topic=t);add(x.notes||'',t=>out.topics[i].notes=t);});
+    out.titles={};out.extra={};
+    (r.layout||[]).forEach(e=>add(e.title,t=>out.titles[e.key]=t));
+    (r.extra||[]).forEach(x=>{const o=out.extra[x.key]={items:[],text:''};(x.items||[]).forEach((it,i)=>add(it,t=>o.items[i]=t));if(x.text)add(x.text,t=>o.text=t);});
     if(items.length){const j=await api('/api/translate',{target,items});j.items.forEach((t,k)=>put[k](t));}
     r.tr[target]=out;if(curRep()===r&&ST.rep.lang===target)render();
     // step 2: the transcript
@@ -403,21 +474,23 @@ async function translateReport(r,target){
   ST.rep.translating=false;if(curRep()===r)render();
 }
 // Writes the meeting report (minutes) from the checked transcript. Uses the names, corrections and edits.
-async function makeMinutes(r){
+async function makeMinutes(r,tplId){
   if(!r||!r.real||r.minutes==='working')return;
+  const tpl=tplById(tplId||r.templateId||getDefaultTplId());
   r.minutes='working';r.minutesErr='';if(curRep()===r)render();
   try{
     const body={title:r.title.startsWith('Solo meeting · ')?'':r.title,date:r.when+' '+r.time,languages:repLangs(r).map(langName),
       people:r.people.map(p=>({name:p.n,role:p.r,dept:p.d,org:p.o})),
-      segments:r.tx.map((l,i)=>({t:l.t,who:r.people[l.p]?.n||'Unknown',text:(r.ed['t'+i]??plain(r,l.s))}))};
+      segments:r.tx.map((l,i)=>({t:l.t,who:r.people[l.p]?.n||'Unknown',text:(r.ed['t'+i]??plain(r,l.s))})),template:tplPayload(tpl)};
     const m=await api('/api/report',body);
     const idx=name=>{const n=String(name||'').trim().toLowerCase();if(!n)return -1;let k=r.people.findIndex(p=>p.n.toLowerCase()===n);
       if(k<0)k=r.people.findIndex(p=>p.n.toLowerCase().split(/\s+/).includes(n.split(/\s+/)[0])&&!/^speaker \d+$/.test(n));return k;};
     for(const k of Object.keys(r.ed))if(/^[sda]\d/.test(k))delete r.ed[k];
     if(r.title.startsWith('Solo meeting · ')&&m.title)r.title=m.title;
     r.v=(r.v||0)+1;
-    Object.assign(r,{sum:m.summary,topics:m.topics,dec:m.decisions,act:m.actions.map(a=>({p:idx(a.owner),t:a.task,due:a.due})),qs:m.questions.map(q=>({p:idx(q.by),t:q.question})),minutes:'done',minutesAt:Date.now()});
-    ['r-top','r-dec','r-act'].forEach(k=>ST.open[k]=true);ST.open['r-tx']=false;
+    Object.assign(r,{sum:m.summary,topics:m.topics,dec:m.decisions,act:m.actions.map(a=>({p:idx(a.owner),t:a.task,due:a.due})),qs:m.questions.map(q=>({p:idx(q.by),t:q.question})),
+      layout:m.layout||null,extra:m.extra||[],templateId:tpl.id,templateName:tpl.name,minutes:'done',minutesAt:Date.now()});
+    ['r-top','r-dec','r-act'].forEach(k=>ST.open[k]=true);(m.extra||[]).forEach(x=>ST.open['r-x-'+x.key]=true);ST.open['r-tx']=false;
     toast('Meeting report ready');
   }catch(e){r.minutes='error';r.minutesErr=e.message;}
   saveReport(r);if(curRep()===r)render();
@@ -591,7 +664,8 @@ function viewReports(){
   const drafts=ST.reports.filter(x=>x.status==='draft').length;
   return capsheet(
     `<div class="eyebrow">Written in English · translate any time</div><h1 class="lt">Reports</h1>
-     <label class="search">${I('search')}<input id="repQ" placeholder="Search title, person or decision" value="${esc(ST.rep.q)}" autocomplete="off" aria-label="Search reports"></label>`,
+     <label class="search">${I('search')}<input id="repQ" placeholder="Search title, person or decision" value="${esc(ST.rep.q)}" autocomplete="off" aria-label="Search reports"></label>
+     <button class="tplbtn" data-act="tpl-manage">${I('copy','s')}<span>Report templates</span><b>${esc(tplById(getDefaultTplId()).name)}</b>${I('fwd','s')}</button>`,
     `<div class="chips">${[['all','All'],['review','Needs review'+(drafts?' · '+drafts:'')],['solo','Solo'],['group','Group']].map(([k,l])=>`<button class="chipf ${ST.rep.filter===k?'on':''}" data-act="rep-filter" data-f="${k}">${l}</button>`).join('')}</div>
      <div id="repList" style="display:flex;flex-direction:column;gap:10px">${repListHTML()}</div>`);
 }
@@ -605,6 +679,9 @@ function repDetail(r){
   const added=list=>r.add[list].map(a=>`<li>${a.done?`<span>${esc(a.fixed)}<span class="tagfix">Dictated</span></span>`:'<span class="rawd" id="dictLive"></span>'}</li>`).join('');
   const n=unsure(r), who=p=>r.people[p]||{n:'Unassigned',c:'#D5D2D0',d:''};
   const mins=r.real?(r.minutes||'none'):'done';
+  // Section headings from the report's template (translated in Arabic), else the standard ones.
+  const lay=r.real&&mins==='done'&&Array.isArray(r.layout)?r.layout:null;
+  const T=(field,fallback)=>{const e=lay&&lay.find(x=>x.field===field);return e?((tr&&tr.titles&&tr.titles[e.key])||e.title):fallback;};
   if(r.real&&lang==='ar'&&!tr)return capsheet(`<div class="bar"><button class="back" data-act="rep-back">${I('back')}Reports</button><span class="grow"></span><span class="lseg" role="group" aria-label="Language">${[['en','EN','English'],['ar','AR','Arabic'],['orig','Orig','As spoken']].map(([k,t,a])=>`<button class="${lang===k?'on':''}" data-act="rep-l" data-l="${k}" aria-label="${a}">${t}</button>`).join('')}</span></div>
       <h1 class="mt">${esc(r.title)}</h1><div class="writing"><span class="gdots"><i></i><i></i><i></i></span>Translating the report into Arabic…</div>`,
     `<p class="fine">The report comes first, in a few seconds. The transcript follows. Tap EN to go back.</p>`);
@@ -615,12 +692,12 @@ function repDetail(r){
     <div class="kind">${I(r.kind==='solo'?'device':'people','s')}<span>${r.kind==='solo'?'Solo':'Group'} · ${r.people.length} people</span>${repStatus(r)}</div>
     <h1 class="mt">${esc(r.title)}</h1>
     <p class="meta">${r.when} · ${r.time} · ${r.dur}<br>Called by ${esc(r.by)}</p>
-    <div class="sumh">${L.sum}</div>
+    ${!lay||lay.some(e=>e.field==='summary')?`<div class="sumh">${esc(T('summary',L.sum))}</div>`:''}
     ${mins==='working'?`<div class="writing"><span class="gdots"><i></i><i></i><i></i></span>Writing the meeting report…</div>`
-      :mins!=='done'?`<p class="sub" style="max-width:none">${mins==='error'?esc(r.minutesErr||'The report could not be written.'):'The transcript is ready. Create the meeting report: summary, decisions, action items and open questions.'}</p><button class="cta" style="margin-top:14px" data-act="rep-minutes">${mins==='error'?'Try again':'Create the meeting report'}</button>`:''}
+      :mins!=='done'?`<p class="sub" style="max-width:none">${mins==='error'?esc(r.minutesErr||'The report could not be written.'):'The transcript is ready. Create the meeting report: summary, decisions, action items and open questions.'}</p><button class="cta" style="margin-top:14px" data-act="rep-minutes">${mins==='error'?'Try again':'Create the meeting report'}</button><button class="tplline" data-act="tpl-choose">Template: <b>${esc(tplById(r.templateId||getDefaultTplId()).name)}</b> · change</button>`:''}
     <ul class="sum ${rtl?'rtl':''} ${ST.rep.shim?'shim':''}" ${rtl?'lang="ar"':''}>${r.sum.map((s,i)=>`<li><span ${E('s'+i,'sum')}>${txt('s'+i,s,tr&&tr.sum[i])}</span></li>`).join('')}${added('sum')}</ul>
     <div class="sumh">Languages detected</div><p class="langs">${repLangs(r).map(langName).join(' · ')}</p>
-    <div class="rchips">${r.real&&mins==='done'&&r.status==='draft'?`<button class="rchip" data-act="rep-minutes">↻ Write the report again</button>`:''}${n&&lang==='en'?`<button class="rchip u1" data-act="u-first">${n} unclear word${n>1?'s':''} · tap the orange text</button>`:''}${r.hist.length?`<span class="rchip">${r.hist.length} change${r.hist.length>1?'s':''} · originals kept</span>`:''}</div>`;
+    <div class="rchips">${r.real&&mins==='done'&&r.status==='draft'?`<button class="rchip" data-act="rep-minutes">↻ Write the report again</button><button class="rchip" data-act="tpl-choose">Template: ${esc(r.templateName||tplById(r.templateId||'standard').name)} ▾</button>`:''}${n&&lang==='en'?`<button class="rchip u1" data-act="u-first">${n} unclear word${n>1?'s':''} · tap the orange text</button>`:''}${r.hist.length?`<span class="rchip">${r.hist.length} change${r.hist.length>1?'s':''} · originals kept</span>`:''}</div>`;
   const topics=(r.topics||[]).map((t0,i)=>{const t=tr&&tr.topics&&tr.topics[i]||t0;return `<div class="act" ${rtl?'dir="rtl" lang="ar"':''}><b class="at" style="display:block;font-weight:700">${esc(t.topic)}</b>${t.notes?`<div style="margin-top:4px;font-size:15px;color:var(--fg2)">${esc(t.notes)}</div>`:''}</div>`;}).join('');
   const dec=`<ol class="nlist ${rtl?'rtl':''} ${ST.rep.shim?'shim':''}" ${rtl?'lang="ar"':''}>${r.dec.map((s,i)=>`<li><span ${E('d'+i,'dec')}>${txt('d'+i,s,tr&&tr.dec[i])}</span></li>`).join('')}${added('dec')}</ol>`;
   const act=r.act.map((a,i)=>{const p=who(a.p),t=tr&&tr.act[i];return `<div class="act"><div class="at ${rtl?'rtl':''}" ${rtl?'dir="rtl" lang="ar"':''} ${E('a'+i,'act')}>${txt('a'+i,a.t,t&&t.t)}</div><div class="am"><span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span><span>${esc((t?t.due:a.due)||'No date')}</span></div></div>`;}).join('');
@@ -642,10 +719,20 @@ function repDetail(r){
     `${r.real&&lang==='orig'?`<p class="note">Transcript as spoken. The report itself is written in English. <button data-act="rep-en" style="font-weight:700;color:var(--accink)">Back to English</button></p>`:''}
      ${lang!=='en'&&lang!=='orig'&&tr?`<p class="note">Translated from English by AI. The English original is kept. <button data-act="rep-en" style="font-weight:700;color:var(--accink)">Show original</button></p>`:''}
      ${ed&&r.real?`<p class="note">Tap any transcript line to change it. Changes are saved in the change history.</p>`:ed?`<p class="note">Tap any text to change it, or use Dictate. Dictated words are cleaned up for grammar and spelling.</p>`:''}
-     ${(r.topics||[]).length?drawer('r-top',lang==='ar'?'النقاش':'Discussion',r.topics.length,topics,true):''}
+     ${lay?lay.filter(e=>e.field!=='summary').map(e=>{
+        const title=esc((tr&&tr.titles&&tr.titles[e.key])||e.title),none=t=>`<p class="fine" style="text-align:start">${t}</p>`;
+        if(e.field==='topics')return drawer('r-top',title,r.topics.length,topics||none('Nothing recorded for this section.'),true);
+        if(e.field==='decisions')return drawer('r-dec',title,r.dec.length+r.add.dec.length,r.dec.length+r.add.dec.length?dec:none('No decisions were made in this meeting.'),true);
+        if(e.field==='actions')return drawer('r-act',title,r.act.length,act||none('No action items came up.'),true);
+        if(e.field==='questions')return drawer('r-qs',title,r.qs.length,qs||none('No open questions.'));
+        const x=(r.extra||[]).find(y=>y.key===e.key)||{items:[],text:''},tx2=tr&&tr.extra&&tr.extra[e.key];
+        const body=x.kind==='text'?(x.text?`<p class="xtext" ${rtl?'dir="rtl" lang="ar"':''}>${esc((tx2&&tx2.text)||x.text)}</p>`:none('Nothing recorded for this section.'))
+          :(x.items.length?`<ul class="sum xlist ${rtl?'rtl':''}" ${rtl?'lang="ar"':''}>${x.items.map((it,i)=>`<li><span>${esc((tx2&&tx2.items[i])||it)}</span></li>`).join('')}</ul>`:none('Nothing recorded for this section.'));
+        return drawer('r-x-'+e.key,title,x.kind==='text'?'':x.items.length,body,true);}).join('')
+     :`${(r.topics||[]).length?drawer('r-top',lang==='ar'?'النقاش':'Discussion',r.topics.length,topics,true):''}
      ${r.dec.length+r.add.dec.length||!r.real?drawer('r-dec',L.dec,r.dec.length+r.add.dec.length,dec,true):mins==='done'?drawer('r-dec',L.dec,0,'<p class="fine" style="text-align:start">No decisions were made in this meeting.</p>'):''}
      ${r.act.length||!r.real?drawer('r-act',L.act,r.act.length,act,!!r.real):mins==='done'?drawer('r-act',L.act,0,'<p class="fine" style="text-align:start">No action items came up.</p>'):''}
-     ${r.qs.length?drawer('r-qs',L.qs,r.qs.length,qs):''}
+     ${r.qs.length?drawer('r-qs',L.qs,r.qs.length,qs):''}`}
      ${drawer('r-ppl',L.ppl,r.people.length,ppl)}
      ${drawer('r-tx',L.tx,r.tx.length,tx,!!r.real&&mins!=='done')}
      ${drawer('r-rec',L.rec,'',rec)}
@@ -739,6 +826,34 @@ const ACT={
    Object.assign(s,{phase:'idle',t:0,paused:false,introEndMs:0,speakers:[],result:null,title:'',rid:null,err:'',mid:null,parts:null,blob:null});
    openReport(r.id);ST.open['r-tx']=false;render();window.scrollTo(0,0);makeMinutes(r);},
  'rep-l'(el){saveAll();const l=el.dataset.l;ST.rep.lang=l;if(l!=='en')ST.rep.edit=false;ST.rep.shim=true;if(l==='ar')ST.open['r-tx']=ST.open['r-tx']||false;render();},
+ 'tpl-manage'(){openTemplates(null);},
+ 'tpl-choose'(){const r=curRep();if(r)openTemplates(r.id);},
+ 'tpl-use'(el){const r=ST.reports.find(x=>x.id===ST.tplFor);closeSheet();if(!r)return;saveAll();makeMinutes(r,el.dataset.id);},
+ 'tpl-open'(el){const t=allTemplates().find(x=>x.id===el.dataset.id);if(t)openTplEditor(t,false);},
+ 'tpl-back'(){openTemplates(ST.tplFor);},
+ 'tpl-new'(){openTplEditor({name:'',sections:[{title:'Summary',kind:'summary',guide:''},{title:'Decisions',kind:'decisions',guide:''},{title:'Action items',kind:'actions',guide:''}]},true);},
+ 'tpl-copy'(){const t=ST.tplEdit;openTplEditor({...t,id:'',name:t.name+' (my copy)',builtIn:false},true);},
+ 'tsec-add'(){syncTplEditor();ST.tplEdit.sections.push({title:'',kind:'bullets',guide:''});renderTplEditor();setTimeout(()=>{const a=$$('.ts-title');a[a.length-1]?.focus();},300);},
+ 'tsec-del'(el){syncTplEditor();ST.tplEdit.sections.splice(+el.dataset.i,1);renderTplEditor();},
+ 'tsec-up'(el){syncTplEditor();const a=ST.tplEdit.sections,i=+el.dataset.i;if(i>0)[a[i-1],a[i]]=[a[i],a[i-1]];renderTplEditor();},
+ 'tsec-down'(el){syncTplEditor();const a=ST.tplEdit.sections,i=+el.dataset.i;if(i<a.length-1)[a[i+1],a[i]]=[a[i],a[i+1]];renderTplEditor();},
+ async 'tpl-save'(){syncTplEditor();const t=ST.tplEdit;
+   t.name=t.name.trim();t.sections=t.sections.map(x=>({title:x.title.trim(),kind:x.kind,guide:x.guide.trim()})).filter(x=>x.title);
+   if(!t.name)return toast('Give the template a name');if(!t.sections.length)return toast('Add at least one section with a heading');
+   const id=t.isNew?'c'+Date.now():t.id,old=(ST.myTemplates||[]).find(x=>x.id===id);
+   await DB.put('templates',{id,owner:ME_USER?.id,name:t.name,sections:t.sections,style:t.style.trim(),example:t.example.trim(),description:t.sections.map(x=>x.title).join(' · '),createdAt:old?.createdAt||Date.now()});
+   await loadTemplates();toast('Template saved');openTplEditor(tplById(id),false);},
+ 'tpl-default'(){const t=ST.tplEdit;if(t.isNew)return toast('Save the template first');setDefaultTplId(t.id);toast(esc(t.name)+' is now used for new reports');renderTplEditor();render();},
+ async 'tpl-del'(){const t=ST.tplEdit;await DB.del('templates',t.id).catch(()=>{});if(getDefaultTplId()===t.id)setDefaultTplId('standard');await loadTemplates();toast('Template deleted');openTemplates(ST.tplFor);render();},
+ 'tpl-example'(){openTplExample();},
+ 'tpl-file'(){$('#tplFileIn').click();},
+ async 'tpl-make'(){
+   const text=($('#exText')?.value||'').trim(),pdf=ST.tplPdf;
+   if(!text&&!pdf)return toast('Paste an example or choose a file');
+   const b=$('#exGo');b.disabled=true;b.textContent='Reading the example…';
+   try{const m=await api('/api/templates/from-example',pdf?{pdf:pdf.b64}:{text});
+     openTplEditor({name:m.name,sections:m.sections,style:m.style,example:pdf?'':text},true);toast('Template ready. Check it, then save.');}
+   catch(e){b.disabled=false;b.textContent='Make the template';sheet(`<h3>The template could not be made</h3><p>${esc(e.message)}</p><div class="stk"><button class="btnk" data-act="tpl-example">Try again</button><button class="btng" data-act="tpl-back">Back</button></div>`);}},
  'rep-minutes'(){const r=curRep();if(!r)return;saveAll();makeMinutes(r);},
  'solo-new'(){const s=ST.solo;Object.assign(s,{phase:'idle',t:0,paused:false,introEndMs:0,speakers:[],result:null,title:'',rid:null,err:'',mid:null});render();checkPending();},
  /* ---- group ---- */
@@ -880,6 +995,7 @@ function signedIn(j){
   $('.me').textContent=j.user.short;$('.me').classList.toggle('adm',j.user.role==='admin');
   render();loadServer();
   loadSaved().then(()=>{render();checkPending();});
+  loadTemplates().then(()=>{if(ST.tab==='reports')render();});
 }
 async function signOut(){
   if(recording())return toast('End the Solo meeting first');
@@ -922,7 +1038,14 @@ document.addEventListener('input',e=>{
   if(e.target.id==='repQ'){ST.rep.q=e.target.value;$('#repList').innerHTML=repListHTML();}
   if(e.target.id==='soloTitle')ST.solo.title=e.target.value;
 });
-document.addEventListener('change',e=>{
+document.addEventListener('change',async e=>{
+  if(e.target.id==='tplFileIn'&&e.target.files[0]){
+    const f=e.target.files[0];e.target.value='';
+    if(f.size>10*1024*1024)return toast('That file is over 10 MB');
+    if(/pdf$/i.test(f.type)||/\.pdf$/i.test(f.name)){ST.tplPdf={name:f.name,b64:await fileToBase64(f)};const p=$('#exFile');if(p)p.textContent='Chosen: '+f.name;}
+    else{const t=await f.text();const ta=$('#exText');if(ta)ta.value=t.slice(0,20000);ST.tplPdf=null;const p=$('#exFile');if(p)p.textContent='Loaded: '+f.name;}
+    return;
+  }
   if(e.target.id!=='fileIn'||!e.target.files[0])return;
   const f=e.target.files[0],s=ST.solo;e.target.value='';
   Object.assign(s,{title:s.title||f.name.replace(/\.[^.]+$/,''),t:0,introEndMs:0,startedAt:0,pending:null});

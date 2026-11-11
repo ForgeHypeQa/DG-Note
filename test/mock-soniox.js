@@ -39,30 +39,42 @@ function tokens() {
 
 app.use((req, res, next) => (req.headers.authorization?.startsWith('Bearer ') || req.headers['x-api-key'] ? next() : res.status(401).json({ message: 'Missing API key' })));
 
-// Stand-in for Claude: writes fixed minutes, or 'translates' by prefixing each item.
-function minutesFor(text) {
+// Stand-in for Claude: follows the report template in the instructions, 'translates' by prefixing,
+// and turns an example report into a template.
+function minutesFor(system, text) {
   const names = [...text.matchAll(/^- ([^(\n]+?)(?: \(|$)/gm)].map(m => m[1].trim());
   const n = i => names[i] || '';
-  console.log('[mock] report for', names.join(', '));
-  return JSON.stringify({
-    title: 'Falls and Medication Review',
+  const secs = [...system.matchAll(/^s(\d+)\. "(.+?)" \((\w+)\)/gm)].map(m => ({ key: 's' + m[1], title: m[2], kind: m[3] }));
+  console.log('[mock] report for', names.join(', '), '| template sections:', secs.map(x => x.title).join(' / '));
+  const fill = {
     summary: ['Mr. Khalid in room 12 fell twice this week, both at night.', 'A walker and twice-weekly physiotherapy will start.', 'Night checks move to every two hours from tonight.'],
-    topics: [{ topic: 'Falls in room 12', notes: 'Two night-time falls this week; gait is unsteady.' }, { topic: 'Medication', notes: 'Amlodipine 10 mg may cause dizziness on standing.' }],
+    discussion: [{ topic: 'Falls in room 12', notes: 'Two night-time falls this week; gait is unsteady.' }, { topic: 'Medication', notes: 'Amlodipine 10 mg may cause dizziness on standing.' }],
     decisions: ['Start a walker and physiotherapy twice a week.', 'Night checks every two hours from tonight.'],
     actions: [{ owner: n(1), task: 'Walker assessment', due: 'Tomorrow' }, { owner: n(3), task: 'Book the family meeting', due: 'Thursday' }, { owner: '', task: 'Update the medication chart', due: '' }],
     questions: [{ by: n(2), question: 'Could the dose be reduced further?' }],
-  });
+    bullets: ['Family meeting: Thursday 11:00', 'Medication review: next Monday'],
+    text: 'Next meeting: Monday 09:00, Room B.',
+  };
+  const sections = {}; for (const x of secs) sections[x.key] = fill[x.kind];
+  return JSON.stringify({ title: 'Falls and Medication Review', sections });
 }
-// Stand-in for Anthropic (Messages API shape).
-app.post('/v1/messages', express.json({ limit: '5mb' }), (req, res) => {
-  const user = req.body.messages?.[0]?.content || '';
+app.post('/v1/messages', express.json({ limit: '20mb' }), (req, res) => {
+  const sys = req.body.system || '', user = req.body.messages?.[0]?.content || '';
+  const send = t => res.json({ content: [{ type: 'text', text: t }] });
   console.log('[mock] claude model', req.body.model);
-  if (/You translate/.test(req.body.system || '')) {
+  if (/You translate/.test(sys)) {
     const items = JSON.parse(user).items;
-    const reply = () => res.json({ content: [{ type: 'text', text: JSON.stringify({ items: items.map(t => t ? 'بالعربية: ' + t : '') }) }] });
-    return setTimeout(reply, Number(process.env.MOCK_DELAY || 0));   // MOCK_DELAY=ms to test slow translation
+    return setTimeout(() => send(JSON.stringify({ items: items.map(t => t ? 'بالعربية: ' + t : '') })), Number(process.env.MOCK_DELAY || 0));   // MOCK_DELAY=ms to test slow translation
   }
-  res.json({ content: [{ type: 'text', text: minutesFor(user) }] });
+  if (/You design meeting-report templates/.test(sys)) {
+    console.log('[mock] template from', Array.isArray(user) ? 'pdf' : 'text');
+    return send(JSON.stringify({ name: 'Ward round report', style: 'Short clinical notes.', sections: [
+      { title: 'Overview', kind: 'summary', guide: 'Two lines.' }, { title: 'Patients', kind: 'discussion', guide: 'One per patient.' },
+      { title: 'Plan', kind: 'decisions', guide: 'Agreed changes.' }, { title: 'Tasks', kind: 'actions', guide: 'Owner and time.' },
+      { title: 'Next review', kind: 'text', guide: 'Date of next review.' }] }));
+  }
+  if (/Reply with JSON \{"ok":true\}/.test(sys)) return send('{"ok":true}');
+  send(minutesFor(sys, typeof user === 'string' ? user : ''));
 });
 
 app.post('/v1/files', express.raw({ type: () => true, limit: '500mb' }), (req, res) => {

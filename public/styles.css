@@ -368,3 +368,25 @@ button.sp{cursor:pointer}
 .lseg button.on{background:#fff;color:var(--ink)}
 .writing.light{background:var(--cardbg);color:var(--fg);border:1px solid var(--cardline);margin-top:0}
 .sum[lang=ar],.nlist[lang=ar]{font-family:var(--ar)}
+
+/* report templates */
+.tplbtn{display:flex;align-items:center;gap:8px;width:100%;margin-top:12px;background:rgba(255,255,255,.07);border-radius:16px;padding:12px 14px;color:#E5E2E1;font-size:14px}
+.tplbtn span{flex:1;text-align:start;font-weight:650}.tplbtn b{color:var(--acc2);font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:45%}
+.tplline{display:block;margin-top:10px;font-size:13.5px;color:#BDB9B8}.tplline b{color:#fff}
+.tpllist{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+.tplrow{display:flex;gap:8px;align-items:center;border:1px solid var(--line);border-radius:18px;padding:4px 8px 4px 4px}
+.tplrow.on{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
+.tplpick{flex:1;text-align:start;padding:10px 12px;min-width:0}
+.tplpick b{display:block;font-size:16px;font-weight:700}.tplpick small{display:block;font-size:13px;color:var(--mut);margin-top:2px}
+.tplbadges{display:flex;gap:6px;margin-top:8px}.tplbadges:empty{display:none}
+.tsecs{display:flex;flex-direction:column;gap:10px}
+.tsec{background:var(--paper);border-radius:16px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.tsec small{font-size:13px;color:var(--mut)}
+.tsec-h{display:flex;align-items:center;gap:8px}
+.tnum{width:24px;height:24px;border-radius:50%;background:var(--ink);color:#fff;font-size:12px;font-weight:750;display:grid;place-items:center;flex:none}
+.tsec input,.tsec select,.tsec textarea,.bsheet textarea{width:100%;border:1px solid var(--line);background:#fff;border-radius:12px;padding:9px 11px;font-size:15px;color:var(--ink);font-family:inherit}
+.tsec input.grow{flex:1;min-width:0;width:auto}
+.ticon{width:32px;height:32px;border-radius:50%;background:#fff;border:1px solid var(--line);font-size:15px;font-weight:700;flex:none}
+.ticon:disabled{opacity:.35}
+.xtext{font-size:15.5px;line-height:1.5}
+.xlist{margin-top:0;font-size:15.5px}
