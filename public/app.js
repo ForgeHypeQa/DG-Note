@@ -667,6 +667,10 @@ function render(){
 /* ================= actions ================= */
 const ACT={
  account(){openAccount();},
+ async 'claude-check'(){const o=$('#ccOut');if(!o)return;o.innerHTML='<p style="font-size:14px">Checking…</p>';
+   try{const r=await fetch(API+'/api/admin/claude-check');const j=await r.json();
+     o.innerHTML=!j.keySet?'<div class="warnbox">No ANTHROPIC_API_KEY on the server.</div>':j.checks.map(c=>`<div class="${c.ok?'note':'warnbox'}" style="margin-top:6px">${c.kind==='report'?'Report writer':'Arabic translation'} · ${esc(c.model)}: ${c.ok?'working':'not working'}${c.ok?'':'<br><small>'+esc(c.error||'')+'</small>'}</div>`).join('');}
+   catch(e){o.innerHTML='<div class="warnbox">'+esc(e.message)+'</div>';}},
  install(){install();},
  'sign-out'(){signOut();},
  async 'adm-out'(el){await api('/api/admin/signout',{id:el.dataset.id});toast(esc(el.dataset.n)+' signed out');openAccount();},
@@ -871,7 +875,7 @@ async function signOut(){
 async function openAccount(){
   const u=ME_USER;if(!u)return;
   const head=`<div style="display:flex;gap:14px;align-items:center"><span class="av lg" style="--c:${u.role==='admin'?'#FF5D00':'#45D3C5'};width:54px;height:54px;font-size:16px">${esc(u.short)}</span><div><h3>${esc(u.name)}</h3><p style="margin:0">${u.role==='admin'?'Admin · full access':'Guest account'}</p></div></div>`;
-  const foot=`<div class="stk">${installBtn('btng')}<button class="btnk" data-act="sign-out">Sign out</button>${u.role==='admin'?'<button class="btng" data-act="restart">Reset the sample data</button>':''}<button class="btng" data-act="close">Close</button></div>`;
+  const foot=`<div class="stk">${u.role==='admin'?'<button class="btng" data-act="claude-check">Check meeting reports (Claude)</button><div id="ccOut"></div>':''}${installBtn('btng')}<button class="btnk" data-act="sign-out">Sign out</button>${u.role==='admin'?'<button class="btng" data-act="restart">Reset the sample data</button>':''}<button class="btng" data-act="close">Close</button></div>`;
   if(u.role!=='admin'){sheet(head+`<p>Signed in on this device. Your meetings stay on this phone until the database is connected.</p>`+foot);return;}
   sheet(head+`<p id="admLoad">Loading who is online…</p>`+foot);
   try{

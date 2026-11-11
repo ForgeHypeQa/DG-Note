@@ -19,7 +19,7 @@ async function ask(system, user, maxTokens, kind) {
   const res = await fetch(base + '/v1/messages', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-api-key': KEY(), 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({ model: model(kind), max_tokens: maxTokens, temperature: 0.2, system, messages: [{ role: 'user', content: user }] }),
+    body: JSON.stringify({ model: model(kind), max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] }),
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(`claude ${res.status}: ${j?.error?.message || res.statusText}`), { status: res.status });

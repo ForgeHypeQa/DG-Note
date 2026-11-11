@@ -12,6 +12,7 @@ import { ROSTER, DEPARTMENTS, DOMAIN_TERMS } from './roster.js';
 import * as auth from './auth.js';
 import { splitParts, joinParts } from './audio.js';
 import * as minutes from './minutes.js';
+import * as llm from './llm.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -118,7 +119,7 @@ app.post('/api/report', auth.requireUser, express.json({ limit: '3mb' }), async 
   const m = req.body || {};
   if (!Array.isArray(m.segments) || !m.segments.length) return res.status(400).json({ error: 'There is no transcript to write a report from.' });
   try { res.json(await minutes.writeMinutes(m)); }
-  catch (e) { console.error('[report]', e.message); res.status(502).json({ error: textError(e, 'The report could not be written. Try again.') }); }
+  catch (e) { console.error('[report]', e.message); res.status(502).json({ error: textError(e, 'The report could not be written. Try again.', req.user) }); }
 });
 
 // Translation of a report and transcript. Body: { target: 'ar'|'en', items: [string] }
@@ -127,14 +128,28 @@ app.post('/api/translate', auth.requireUser, express.json({ limit: '3mb' }), asy
   const { target, items } = req.body || {};
   if (!['ar', 'en'].includes(target) || !Array.isArray(items)) return res.status(400).json({ error: 'Nothing to translate.' });
   try { res.json({ items: await minutes.translate(items.slice(0, 3000), target) }); }
-  catch (e) { console.error('[translate]', e.message); res.status(502).json({ error: textError(e, 'The translation could not be made. Try again.') }); }
+  catch (e) { console.error('[translate]', e.message); res.status(502).json({ error: textError(e, 'The translation could not be made. Try again.', req.user) }); }
 });
-function textError(e, fallback) {
-  const st = Number(e.status);
-  return st === 401 || st === 403 ? 'Reports and translation are not set up correctly on the server. Ask the admin.'
-    : st === 402 ? 'The report account has run out of credit. Ask the admin.'
+function textError(e, fallback, user) {
+  const st = Number(e.status), m = String(e.message || '');
+  const msg = /credit balance|billing|insufficient/i.test(m) ? 'The Claude account has no credit for this key. Ask the admin.'
+    : st === 401 || st === 403 ? 'Reports and translation are not set up correctly on the server. Ask the admin.'
+    : st === 402 ? 'The Claude account has no credit for this key. Ask the admin.'
     : st === 429 || st === 529 ? 'The report writer is busy. Try again in a minute.' : fallback;
+  // The admin also sees the exact reason, so problems can be fixed without opening the server logs.
+  return user?.role === 'admin' ? `${msg} Details for admin: ${m.slice(0, 300)}` : msg;
 }
+
+// Admin: one tiny test call to each Claude model, to check the key, credit and model names.
+app.get('/api/admin/claude-check', auth.requireAdmin, async (req, res) => {
+  const out = { keySet: minutes.configured(), checks: [] };
+  for (const kind of ['report', 'translate']) {
+    const model = llm.model(kind);
+    try { await llm.askJSON('Reply with JSON {"ok":true} only.', 'ping', 20, kind); out.checks.push({ kind, model, ok: true }); }
+    catch (e) { out.checks.push({ kind, model, ok: false, status: e.status || null, error: String(e.message).slice(0, 300) }); }
+  }
+  res.json(out);
+});
 
 // What the user sees when something goes wrong: no engine names, no technical detail.
 function friendly(e) {
