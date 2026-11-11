@@ -39,17 +39,7 @@ function tokens() {
 
 app.use((req, res, next) => (req.headers.authorization?.startsWith('Bearer ') || req.headers['x-api-key'] ? next() : res.status(401).json({ message: 'Missing API key' })));
 
-// Stand-in for OpenRouter (OpenAI chat shape): translation or minutes.
-app.post('/v1/chat/completions', express.json({ limit: '5mb' }), (req, res) => {
-  const sys = req.body.messages?.[0]?.content || '', user = req.body.messages?.[1]?.content || '';
-  if (/You translate/.test(sys)) {
-    const items = JSON.parse(user).items;
-    console.log('[mock] translate', items.length, 'items');
-    return res.json({ choices: [{ message: { content: JSON.stringify({ items: items.map(t => t ? 'بالعربية: ' + t : '') }) } }] });
-  }
-  const r = minutesFor(user);
-  res.json({ choices: [{ message: { content: r } }] });
-});
+// Stand-in for Claude: writes fixed minutes, or 'translates' by prefixing each item.
 function minutesFor(text) {
   const names = [...text.matchAll(/^- ([^(\n]+?)(?: \(|$)/gm)].map(m => m[1].trim());
   const n = i => names[i] || '';

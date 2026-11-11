@@ -1,6 +1,6 @@
 // Writes meeting minutes from a checked transcript (summary, topics, decisions,
 // action items, open questions), and translates reports and transcripts.
-// The text engine (OpenRouter or Anthropic) is chosen in llm.js. Shown to users only as "ForgeHype Meet".
+// Claude (see llm.js). Shown to users only as "ForgeHype Meet".
 import * as llm from './llm.js';
 export const configured = llm.configured;
 const SYSTEM = `You are the minute-taker for ForgeHype Meet. You turn a meeting transcript into clear, professional meeting minutes in English.
