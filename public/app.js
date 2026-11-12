@@ -162,7 +162,7 @@ const autoReport=()=>{try{return localStorage.getItem(autoKey())==='1';}catch(e)
 const isListen=()=>ST.solo.mode==='listen';
 const onRecTab=()=>ST.tab===(isListen()?'listen':'solo');
 let FILE_MODE='solo';
-const savedTxt=()=>`Saved on this ${isListen()?'computer':'phone'} · ${(REC.bytes/1048576).toFixed(1)} MB`;
+const savedTxt=()=>`Saved on this ${isListen()&&canListen()?'computer':'phone'} · ${(REC.bytes/1048576).toFixed(1)} MB`;
 async function recStart(continueMid,src){
   if(!window.isSecureContext) throw new Error('The microphone only works over https (or on localhost). Open DG-Note from its https address.');
   if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder) throw new Error('This browser cannot record audio. Use Chrome on Android or Safari on iPhone.');
@@ -388,6 +388,14 @@ async function listenCapture(withMic){
   if(ctx.state==='suspended')try{await ctx.resume();}catch(e){}
   return dest.stream;
 }
+// On a phone the lecture plays inside this page, so the page stays open and keeps recording.
+function ytId(u){const m=String(u||'').trim().match(/(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/))([\w-]{11})/);return m?m[1]:null;}
+function syncPlayer(){
+  const box=$('#lisPlayer');if(!box)return;const s=ST.solo,id=isListen()&&s.phase==='meet'&&!LIS.disp?ytId(s.lurl):null;
+  if(!id){if(box.dataset.id){box.innerHTML='';delete box.dataset.id;}box.hidden=true;return;}
+  if(box.dataset.id!==id){box.dataset.id=id;box.innerHTML=`<iframe src="https://www.youtube-nocookie.com/embed/${id}?playsinline=1&rel=0" title="Lecture video" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`;}
+  box.hidden=ST.tab!=='listen';
+}
 function listenCleanup(){
   try{LIS.pip?.close();}catch(e){}
   [LIS.disp,LIS.mic].forEach(m=>m?.getTracks().forEach(t=>t.stop()));
@@ -441,7 +449,8 @@ function viewListen(){
      <div class="lsrc"><span>${I('speaker','s')}Computer sound</span><i>+</i><span>${I('mic','s')}Your microphone</span></div>`,
     `${serverNote()}
      ${s.pending?`<div class="note">A recording is waiting to be sent. Open Solo to send it.</div>`:''}
-     ${ok?'':`<div class="note">On a phone, Listen hears through the microphone, because phones do not let a web page take the sound they play. Play the video or call on a loudspeaker near this phone and keep this page on screen. For a direct, cleaner signal use Chrome or Edge on a computer.</div>`}
+     ${ok?'':`<div class="note">On a phone, the video plays inside this page and the microphone listens to the loudspeaker. Paste the YouTube link below. Leaving this page stops the recording, so watch it here.</div>
+       <label class="fld"><span>Video link (YouTube)</span><input id="lisUrl" value="${esc(s.lurl||'')}" placeholder="Paste the link from Share" inputmode="url" autocomplete="off" autocapitalize="none"></label>`}
      <div class="lopts" role="radiogroup" aria-label="What are you listening to">
        <button class="lopt ${k==='video'?'on':''}" role="radio" aria-checked="${k==='video'}" data-act="listen-kind" data-k="video"><b>Video or lecture</b><small>Learning notes: summary, key lessons, terms and steps</small></button>
        <button class="lopt ${k==='call'?'on':''}" role="radio" aria-checked="${k==='call'}" data-act="listen-kind" data-k="call"><b>Call or meeting</b><small>Minutes: who said what, decisions and action items</small></button></div>
@@ -459,9 +468,9 @@ function viewListen(){
      <div class="lmeters"><div class="lm">${I('speaker','s')}<span>Computer sound</span><div class="lbar"><i id="lSys"></i></div></div>
        ${LIS.mic?`<div class="lm">${I('mic','s')}<span>Your microphone</span><div class="lbar mic"><i id="lMic"></i></div></div>`:`<div class="lm off">${I('mic','s')}<span>Microphone off</span></div>`}</div>${LIS.disp?'':'-->'}
      <p class="now" id="lQuiet" hidden>No sound from the computer. Is it playing?</p>`,
-    `<div class="pcard" style="padding:16px 18px"><b style="font-size:17px">Listening</b><p style="color:var(--fg2);margin-top:4px;font-size:15px">${LIS.disp?`Go to your ${s.lkind==='call'?'call':'video'}. This page keeps listening in the background. Come back and stop when you are done.`:`Play the ${s.lkind==='call'?'call':'video'} on a loudspeaker near this phone and keep this page on screen. Stop when you are done.`}</p></div>
+    `<div class="pcard" style="padding:16px 18px"><b style="font-size:17px">Listening</b><p style="color:var(--fg2);margin-top:4px;font-size:15px">${LIS.disp?`Go to your ${s.lkind==='call'?'call':'video'}. This page keeps listening in the background. Come back and stop when you are done.`:(ytId(s.lurl)?'Press play on the video above. Keep the sound on the loudspeaker, not headphones, and stay on this page. Stop when the lecture ends.':`Play the ${s.lkind==='call'?'call':'video'} on a loudspeaker near this phone and keep this page on screen. Stop when you are done.`)}</p></div>
      <p class="fine" id="sSaved">${savedTxt()}</p>
-     ${'documentPictureInPicture' in window?`<button class="btn2" data-act="listen-pip">Float the controls over other windows</button>`:''}
+     ${LIS.disp&&'documentPictureInPicture' in window?`<button class="btn2" data-act="listen-pip">Float the controls over other windows</button>`:''}
      <div class="dock"><button class="dbt" data-act="solo-pause" id="sPause">${s.paused?I('play','s')+'Resume':I('pause','s')+'Pause'}</button><button class="dbt red" data-act="solo-end">${I('stop','s')}Stop and write notes</button></div>`);
   return viewSolo(true);
 }
@@ -904,6 +913,7 @@ function render(){
   stopPlay();
   $('#view').innerHTML = ST.tab==='solo'?viewSolo():ST.tab==='listen'?viewListen():ST.tab==='group'?viewGroup():viewReports();
   if(ST.tab==='solo'||ST.tab==='listen') syncSolo();
+  syncPlayer();
   if(ST.tab==='group') syncGroup();
   ST.rep.shim=false;
 }
@@ -959,7 +969,9 @@ const ACT={
    if(s.lkind==='call')sheet(`<div class="bigic">${I('speaker')}</div><h3>Tell everyone on the call first</h3><p>Say that the call is being recorded for notes before you start. Recording people without telling them can be against the law.</p><div class="stk"><button class="btnk" data-act="listen-go">Everyone knows · Start listening</button><button class="btng" data-act="close">Cancel</button></div>`);
    else ACT['listen-go']();},
  async 'listen-go'(){
-   closeSheet();const s=ST.solo;if(s.phase!=='idle')return;s.mode='listen';
+   closeSheet();const s=ST.solo;if(s.phase!=='idle')return;
+   if(!canListen()&&(s.lurl||'').trim()&&!ytId(s.lurl))return toast('That is not a YouTube video link. Paste the link from Share, or leave it empty.');
+   s.mode='listen';
    try{if(canListen()){const stream=await listenCapture(s.lmic);await recStart(null,{stream});}else await recStart();}
    catch(e){listenCleanup();
      if(e.name==='NotAllowedError'&&!e.noSound)return toast('Nothing was shared, so Listen did not start');
@@ -1207,6 +1219,7 @@ document.addEventListener('submit',e=>{e.preventDefault();const f=e.target.datas
 document.addEventListener('input',e=>{
   if(e.target.id==='repQ'){ST.rep.q=e.target.value;$('#repList').innerHTML=repListHTML();}
   if(e.target.id==='soloTitle')ST.solo.title=e.target.value;
+  if(e.target.id==='lisUrl')ST.solo.lurl=e.target.value;
 });
 document.addEventListener('change',async e=>{
   if(e.target.id==='tplFileIn'&&e.target.files[0]){

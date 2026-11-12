@@ -40,3 +40,8 @@
 .bsheet .lsw{background:var(--paper);border-color:transparent;color:var(--ink);text-align:start}
 .bsheet .lsw small{color:var(--mut)}
 .bsheet .lsw>i{background:#C9C5C3}.bsheet .lsw.on>i{background:var(--acc)}
+
+/* the lecture plays inside the page on a phone */
+#lisPlayer{position:sticky;top:0;z-index:15;background:#000}
+#lisPlayer[hidden]{display:none}
+#lisPlayer iframe{display:block;width:100%;aspect-ratio:16/9;border:0}
