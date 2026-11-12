@@ -24,7 +24,45 @@ function markWords(words, idPrefix) {
   }).join(' ').replace(/\s+([.,!?;:،؟])/g, '$1');
 }
 
-export function buildResult(tokens, { introEndMs = 0, roster, departments, durationMs = 0 } = {}) {
+// The app speaks a recording notice at the start of every Solo meeting. That voice is the phone,
+// not a person, so it is removed: everything before announceEndMs (when the app says the notice
+// finished), and as a backup anything in the first minute that matches the notice's wording.
+export const ANNOUNCEMENT = 'This meeting will be recorded for digital records. Please go around the table and introduce yourselves.';
+const norm = w => w.toLowerCase().replace(/[^a-z]/g, '');
+export function dropAnnouncement(tokens, announceEndMs = 0) {
+  let out = [], dropping = false;
+  for (const t of tokens || []) {
+    if (t.translation_status === 'translation') { if (!dropping) out.push(t); continue; }
+    dropping = announceEndMs > 0 && (t.start_ms ?? 0) < announceEndMs;
+    if (!dropping) out.push(t);
+  }
+  // Wording backup: group original tokens into words, find a run that reads like the notice.
+  const A = ANNOUNCEMENT.split(/\s+/).map(norm).filter(Boolean), L = A.length;
+  const words = [];
+  out.forEach((t, i) => {
+    if (t.translation_status === 'translation' || t.is_audio_event) return;
+    const txt = t.text || '';
+    if (!words.length || /^\s/.test(txt)) words.push({ text: txt, from: i, to: i, start: t.start_ms ?? 0 });
+    else { const w = words[words.length - 1]; w.text += txt; w.to = i; }
+  });
+  for (let i = 0; i < words.length && words[i].start < 60000; i++) {
+    let hit = 0, last = -1;
+    for (let k = 0; k < L + 4 && i + k < words.length; k++) {
+      const w = norm(words[i + k].text); if (!w) continue;
+      if (A.slice(Math.max(0, k - 4), k + 5).includes(w)) { hit++; last = i + k; }
+    }
+    if (hit >= Math.ceil(L * 0.6)) {
+      let to = words[last].to;
+      while (to + 1 < out.length && !/[\p{L}\p{N}]/u.test(out[to + 1].text || '') && out[to + 1].translation_status !== 'translation') to++;
+      out = out.filter((_, j) => j < words[i].from || j > to);
+      break;
+    }
+  }
+  return out;
+}
+
+export function buildResult(tokens, { introEndMs = 0, announceEndMs = 0, roster, departments, durationMs = 0 } = {}) {
+  tokens = dropAnnouncement(tokens, announceEndMs);
   // 1. Split into segments: a new segment when the speaker changes,
   //    or when a translated sentence has finished and original speech resumes.
   const raw = [];

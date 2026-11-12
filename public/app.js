@@ -229,7 +229,7 @@ async function processMeeting(mid,fileBlob){
     if(HEALTH?.offline)throw new Error('Cannot reach the DG-Note server. Your recording is safe on this phone. Try again when you are online.');
     if(!HEALTH.engine)throw new Error('Transcription is not switched on for this server yet. Ask the admin. Your recording is safe on this phone.');
     s.step='upload';render();
-    const q=new URLSearchParams({title:s.title||'',introEndMs:String(Math.round(s.introEndMs||0)),durationMs:String(Math.round((s.t||0)*1000))});
+    const q=new URLSearchParams({title:s.title||'',introEndMs:String(Math.round(s.introEndMs||0)),announceEndMs:String(Math.round(s.announceEndMs||0)),durationMs:String(Math.round((s.t||0)*1000))});
     const job=await upload(API+'/api/solo/jobs?'+q,blob,p=>{s.upPct=p;const e=$('#upPct');if(e)e.textContent=Math.round(p*100)+'%';},parts.length>1?{'X-Parts':parts.map(b=>b.size).join(',')}:{});
     s.step='queued';render();
     for(;;){
@@ -784,9 +784,12 @@ const ACT={
  async 'solo-go'(){
    closeSheet();const s=ST.solo;
    try{await recStart();}catch(e){sheet(`<h3>Cannot use the microphone</h3><p>${esc(e.name==='NotAllowedError'?'Microphone access was blocked. Allow the microphone for this site in the browser settings, then try again.':(e.message||String(e)))}</p><div class="stk"><button class="btnk" data-act="close">OK</button></div>`);return;}
-   Object.assign(s,{phase:'intro',t:0,paused:false,introEndMs:0,startedAt:Date.now(),speakers:[],result:null,blob:null,rid:null,mid:REC.mid,pending:null});
+   Object.assign(s,{phase:'intro',t:0,paused:false,introEndMs:0,announceEndMs:0,startedAt:Date.now(),speakers:[],result:null,blob:null,rid:null,mid:REC.mid,pending:null});
    render();window.scrollTo(0,0);
-   try{const u=new SpeechSynthesisUtterance('This meeting will be recorded for digital records. Please go around the table and introduce yourselves.');speechSynthesis.cancel();speechSynthesis.speak(u);}catch(e){}
+   // The notice is spoken while recording; note when it ends so it is cut from the transcript.
+   try{const u=new SpeechSynthesisUtterance('This meeting will be recorded for digital records. Please go around the table and introduce yourselves.');
+     const t0=s.startedAt,mid=s.mid;u.onend=()=>{if(ST.solo.mid!==mid)return;ST.solo.announceEndMs=Date.now()-t0+400;DB.patch(mid,{announceEndMs:ST.solo.announceEndMs}).catch(()=>{});};
+     speechSynthesis.cancel();speechSynthesis.speak(u);}catch(e){}
  },
  'solo-begin'(){const s=ST.solo;s.introEndMs=s.t*1000;DB.patch(REC.mid,{introEndMs:s.introEndMs}).catch(()=>{});s.phase='meet';render();toast('Introductions saved. Talk as usual.');},
  'solo-pause'(){const s=ST.solo;s.paused=!s.paused;try{s.paused?REC.mr.pause():REC.mr.resume();}catch(e){}
@@ -802,14 +805,14 @@ const ACT={
  'solo-save-audio'(){saveAudio(ST.solo.blob,audioName());},
  async 'solo-continue'(){const s=ST.solo,m=s.pending;if(!m)return;
    try{await recStart(m.mid);}catch(e){sheet(`<h3>Cannot use the microphone</h3><p>${esc(e.message||String(e))}</p><div class="stk"><button class="btnk" data-act="close">OK</button></div>`);return;}
-   Object.assign(s,{title:m.title||'',introEndMs:m.introEndMs||0,t:m.durationSec||0,startedAt:m.startedAt,pending:null,paused:false,mid:m.mid,phase:m.introEndMs?'meet':'intro',speakers:[],result:null,rid:null});
+   Object.assign(s,{title:m.title||'',introEndMs:m.introEndMs||0,announceEndMs:m.announceEndMs||0,t:m.durationSec||0,startedAt:m.startedAt,pending:null,paused:false,mid:m.mid,phase:m.introEndMs?'meet':'intro',speakers:[],result:null,rid:null});
    render();window.scrollTo(0,0);toast('Recording again. The new part joins the same meeting.');},
  async 'solo-continue-now'(){closeSheet();const s=ST.solo;
    try{REC.stopping=true;REC.stream?.getTracks().forEach(t=>t.stop());cancelAnimationFrame(REC.raf);try{REC.ctx?.close();}catch(e){}
      await Promise.all(REC.saves);await recStart(REC.mid);}
    catch(e){sheet(`<h3>Cannot use the microphone</h3><p>${esc(e.message||String(e))}</p><div class="stk"><button class="btnk" data-act="solo-end-ok">End meeting and send</button></div>`);return;}
    s.paused=false;render();toast('Recording again. The new part joins the same meeting.');},
- 'solo-pending'(){const s=ST.solo,m=s.pending;if(!m)return;Object.assign(s,{title:m.title||'',introEndMs:m.introEndMs||0,t:m.durationSec||0,startedAt:m.startedAt,pending:null});processMeeting(m.mid);},
+ 'solo-pending'(){const s=ST.solo,m=s.pending;if(!m)return;Object.assign(s,{title:m.title||'',introEndMs:m.introEndMs||0,announceEndMs:m.announceEndMs||0,t:m.durationSec||0,startedAt:m.startedAt,pending:null});processMeeting(m.mid);},
  async 'solo-discard'(){const s=ST.solo;if(!s.pending)return;await DB.remove(s.pending.mid).catch(()=>{});s.pending=null;render();toast('Recording deleted from this phone');},
  'sp-toggle'(el){const i=+el.dataset.i,x=ST.solo.speakers[i];x.open=!x.open;$('#fc'+i).classList.toggle('open',x.open);el.setAttribute('aria-expanded',x.open);},
  'sp-merge'(el){const s=ST.solo,x=s.speakers[+el.dataset.i],t=s.speakers.find(y=>y.label===el.dataset.into);if(!x||!t)return;
@@ -1048,7 +1051,7 @@ document.addEventListener('change',async e=>{
   }
   if(e.target.id!=='fileIn'||!e.target.files[0])return;
   const f=e.target.files[0],s=ST.solo;e.target.value='';
-  Object.assign(s,{title:s.title||f.name.replace(/\.[^.]+$/,''),t:0,introEndMs:0,startedAt:0,pending:null});
+  Object.assign(s,{title:s.title||f.name.replace(/\.[^.]+$/,''),t:0,introEndMs:0,announceEndMs:0,startedAt:0,pending:null});
   processMeeting(null,f);
 });
 document.addEventListener('focusin',e=>{const el=e.target.closest&&e.target.closest('[data-ek]');if(el)ST.rep.focus=el.dataset.list;});

@@ -31,7 +31,7 @@ app.get('/api/health', (req, res) => res.json({ ok: true, engine: engine.configu
 app.get('/api/roster', auth.requireUser, (req, res) => res.json({ people: ROSTER, departments: Object.keys(DEPARTMENTS) }));
 
 // Body = the raw audio file (or several parts back to back, with header
-// X-Parts: "size1,size2,..."). Query: title, introEndMs, durationMs.
+// X-Parts: "size1,size2,..."). Query: title, introEndMs, announceEndMs, durationMs.
 app.post('/api/solo/jobs', auth.requireUser, express.raw({ type: () => true, limit: '500mb' }), (req, res) => {
   if (!engine.configured()) return res.status(503).json({ error: 'Transcription is not switched on for this server yet. Ask the admin.' });
   const buf = req.body;
@@ -42,6 +42,7 @@ app.post('/api/solo/jobs', auth.requireUser, express.raw({ type: () => true, lim
     id: randomUUID(), status: 'working', step: 'upload', createdAt: Date.now(),
     title: String(req.query.title || '').slice(0, 120),
     introEndMs: Math.max(0, +req.query.introEndMs || 0),
+    announceEndMs: Math.min(60000, Math.max(0, +req.query.announceEndMs || 0)),
     durationMs: Math.max(0, +req.query.durationMs || 0),
     bytes: buf.length,
   };
@@ -101,7 +102,7 @@ async function run(job, parts, mime, ext) {
     }
     job.step = 'naming';
     const transcript = await engine.getTranscript(trId);
-    job.result = buildResult(transcript.tokens, { introEndMs: job.introEndMs, durationMs: job.durationMs, roster: ROSTER, departments: DEPARTMENTS });
+    job.result = buildResult(transcript.tokens, { introEndMs: job.introEndMs, announceEndMs: job.announceEndMs, durationMs: job.durationMs, roster: ROSTER, departments: DEPARTMENTS });
     job.status = 'done'; job.step = 'done';
   } catch (e) {
     console.error(`[job ${job.id}]`, e.message);   // full detail stays in the server log only
