@@ -114,6 +114,39 @@ async function run(job, parts, mime, ext) {
   }
 }
 
+// Live text for Listen: the app sends the last few seconds as a small stand-alone clip and gets its
+// text back (as spoken, and in English). Nothing is kept. The full recording is still transcribed at the end.
+const liveBusy = new Map();
+app.post('/api/live/chunk', auth.requireUser, express.raw({ type: () => true, limit: '2mb' }), async (req, res) => {
+  if (!engine.configured()) return res.status(503).json({ error: 'Transcription is not switched on for this server yet.' });
+  const buf = req.body; if (!buf || !buf.length) return res.status(400).json({ error: 'No audio received.' });
+  const uid = req.user.id, n = liveBusy.get(uid) || 0;
+  if (n >= 4) return res.status(429).json({ error: 'Live text is catching up.' });
+  liveBusy.set(uid, n + 1);
+  const mime = (req.headers['content-type'] || 'audio/webm').split(';')[0], ext = /mp4/.test(mime) ? 'm4a' : /ogg/.test(mime) ? 'ogg' : 'webm';
+  let fileId, trId;
+  try {
+    fileId = (await engine.uploadFile(buf, `dg-live-${randomUUID()}.${ext}`, mime)).id;
+    trId = (await engine.createTranscription({ file_id: fileId, language_hints: ['en', 'ar'], enable_speaker_diarization: true, enable_language_identification: true, translation: { type: 'one_way', target_language: 'en' } })).id;
+    const started = Date.now();
+    for (;;) {
+      await sleep(700);
+      const st = await engine.getTranscription(trId);
+      if (st.status === 'completed') break;
+      if (st.status === 'error') throw new Error(st.error_message || 'transcription error');
+      if (Date.now() - started > 45000) throw new Error('timeout');
+    }
+    const r = buildResult((await engine.getTranscript(trId)).tokens, { roster: ROSTER, departments: DEPARTMENTS });
+    const strip = t => String(t || '').replace(/\{\{[^|]*\|([^|]*)\|\}\}/g, '$1');
+    res.json({ text: r.segments.map(g => g.orig || strip(g.text)).join(' ').trim(), en: r.segments.map(g => strip(g.text)).join(' ').trim(), voices: new Set(r.segments.map(g => g.speaker)).size, languages: r.languages || [] });
+  } catch (e) { console.warn('[live]', e.message); res.status(502).json({ error: 'This part could not be transcribed.' }); }
+  finally {
+    liveBusy.set(uid, Math.max(0, (liveBusy.get(uid) || 1) - 1));
+    if (trId) engine.deleteTranscription(trId).catch(() => {});
+    if (fileId) engine.deleteFile(fileId).catch(() => {});
+  }
+});
+
 // Meeting minutes from a checked transcript. Body: { title, date, languages, people[], segments[{who,t,text}] }.
 // Nothing is stored: the transcript is sent, the minutes come back.
 app.post('/api/report', auth.requireUser, express.json({ limit: '3mb' }), async (req, res) => {

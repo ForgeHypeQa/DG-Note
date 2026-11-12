@@ -87,7 +87,7 @@ const T=(fn,ms)=>{const id=setTimeout(fn,ms);TM.push(id);return id;};
 function fresh(){
   TM.forEach(clearTimeout);TM=[];
   ST={tab:'solo',open:{},
-   solo:{mode:'solo',lkind:'video',lmic:true,phase:'idle',title:'',t:0,paused:false,introEndMs:0,startedAt:0,speakers:[],result:null,blob:null,mid:null,rid:null,step:'',err:'',upPct:0,pending:null},
+   solo:{mode:'solo',lkind:'video',lmic:true,live:[],voices:0,ltr:false,ltarget:'en',mini:false,lurl:'',phase:'idle',title:'',t:0,paused:false,introEndMs:0,startedAt:0,speakers:[],result:null,blob:null,mid:null,rid:null,step:'',err:'',upPct:0,pending:null},
    group:{phase:'lobby',live:true,joined:false,sim:false,elapsed:23*60+14,paused:false,hands:[],sharing:null,stageOpen:true,chat:[],qs:[],talk:'sara',unChat:0,unQs:0,
      people:['sara','priya','noura','fatima','joseph','rami'],pi:0,rid:null,
      upcoming:[{t:'Medication Safety Review',w:'Tomorrow · 11:00',by:'Noura'},{t:'Monthly Quality & Incidents',w:'Thu 12 Nov · 14:00',by:'Rami'}]},
@@ -162,7 +162,7 @@ const autoReport=()=>{try{return localStorage.getItem(autoKey())==='1';}catch(e)
 const isListen=()=>ST.solo.mode==='listen';
 const onRecTab=()=>ST.tab===(isListen()?'listen':'solo');
 let FILE_MODE='solo';
-const savedTxt=()=>`Saved on this ${isListen()&&canListen()?'computer':'phone'} · ${(REC.bytes/1048576).toFixed(1)} MB`;
+const savedTxt=()=>isListen()?`${(REC.bytes/1048576).toFixed(1)} MB`:`Saved on this phone · ${(REC.bytes/1048576).toFixed(1)} MB`;
 async function recStart(continueMid,src){
   if(!window.isSecureContext) throw new Error('The microphone only works over https (or on localhost). Open DG-Note from its https address.');
   if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder) throw new Error('This browser cannot record audio. Use Chrome on Android or Safari on iPhone.');
@@ -390,10 +390,17 @@ async function listenCapture(withMic){
 }
 // On a phone the lecture plays inside this page, so the page stays open and keeps recording.
 function ytId(u){const m=String(u||'').trim().match(/(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|shorts\/|live\/|embed\/))([\w-]{11})/);return m?m[1]:null;}
+const YT={t:0,state:-1};
+window.addEventListener('message',e=>{if(!/youtube/.test(e.origin))return;let d;try{d=JSON.parse(e.data);}catch(x){return;}
+  if(d.event==='infoDelivery'&&d.info){if(d.info.currentTime!=null)YT.t=d.info.currentTime;if(d.info.playerState!=null){YT.state=d.info.playerState;const b=$('#ytP');if(b)b.innerHTML=YT.state===1?I('pause','s')+'Pause':I('play','s')+'Play';}}});
+function ytCmd(func,args){const f=$('#lisPlayer iframe');if(f)f.contentWindow.postMessage(JSON.stringify({event:'command',func,args:args||[]}),'*');}
 function syncPlayer(){
-  const box=$('#lisPlayer');if(!box)return;const s=ST.solo,id=isListen()&&s.phase==='meet'&&!LIS.disp?ytId(s.lurl):null;
+  const box=$('#lisPlayer');if(!box)return;const s=ST.solo,id=!canListen()&&(s.phase==='idle'||(isListen()&&s.phase==='meet'))?ytId(s.lurl):null;
   if(!id){if(box.dataset.id){box.innerHTML='';delete box.dataset.id;}box.hidden=true;return;}
-  if(box.dataset.id!==id){box.dataset.id=id;box.innerHTML=`<iframe src="https://www.youtube-nocookie.com/embed/${id}?playsinline=1&rel=0" title="Lecture video" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`;}
+  if(box.dataset.id!==id){box.dataset.id=id;YT.t=0;YT.state=-1;
+    box.innerHTML=`<iframe src="https://www.youtube-nocookie.com/embed/${id}?playsinline=1&rel=0&enablejsapi=1&origin=${encodeURIComponent(location.origin)}" title="Lecture video" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
+      <div class="ytc"><button data-act="yt-b" aria-label="Back 10 seconds">${li(LIc.b10)}10s</button><button data-act="yt-p" id="ytP">${I('play','s')}Play</button><button data-act="yt-f" aria-label="Forward 10 seconds">10s${li(LIc.f10)}</button></div>`;
+    const f=box.querySelector('iframe');f.addEventListener('load',()=>{const hi=()=>f.contentWindow&&f.contentWindow.postMessage(JSON.stringify({event:'listening',id:'lis',channel:'widget'}),'*');hi();setTimeout(hi,800);});}
   box.hidden=ST.tab!=='listen';
 }
 function listenCleanup(){
@@ -404,6 +411,7 @@ function listenCleanup(){
 }
 function listenLevels(a,b,dt){
   const s=ST.solo;if(!isListen()||s.phase!=='meet')return;
+  LIVE.level=Math.max(a,b);LIVE.peak=Math.max(LIVE.peak,LIVE.level);
   if(!s.paused){
     LIS.t+=dt;const on=b>0.012&&b>a*0.6?1:0,idx=Math.floor(LIS.t*5);while(LIS.flags.length<=idx)LIS.flags.push(on);   // when the microphone was the one talking
     if(a>0.003)LIS.quiet=0;else LIS.quiet+=dt;
@@ -440,39 +448,84 @@ async function listenPip(auto){
   w.addEventListener('pagehide',()=>{LIS.pip=null;});
   LIS.pip=w;
 }
+/* ---------- Listen screen: text card, quick buttons, record bar ---------- */
+const LSEG=14;
+const li=d=>`<svg class="i s" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+const LIc={link:'<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>',file:'<path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8zM14 3v5h5"/>',help:'<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 114 2c-.9.6-1.5 1.1-1.5 2.2M12 17h.01"/>',min:'<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>',max:'<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',dl:'<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>',globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/>',b10:'<path d="M11 5L6 9l5 4M6 9h7a5 5 0 010 10H9"/>',f10:'<path d="M13 5l5 4-5 4M18 9h-7a5 5 0 000 10h4"/>'};
+// Live text: every 10 seconds the last stretch of sound is sent as a small clip and its text comes back.
+const LIVE={on:false,mr:null,timer:0,idx:0,level:0,peak:0,meterOk:false,ctx:null,raf:0};
+function liveAnalyse(stream){
+  try{const ctx=new (window.AudioContext||window.webkitAudioContext)(),an=ctx.createAnalyser();an.fftSize=1024;ctx.createMediaStreamSource(stream).connect(an);LIVE.ctx=ctx;LIVE.meterOk=true;
+    if(ctx.state!=='running')ctx.resume().catch(()=>{}).then(()=>{if(ctx.state!=='running')LIVE.meterOk=false;});
+    const buf=new Float32Array(an.fftSize),loop=()=>{an.getFloatTimeDomainData(buf);let q=0;for(const v of buf)q+=v*v;LIVE.level=Math.sqrt(q/buf.length);LIVE.peak=Math.max(LIVE.peak,LIVE.level);LIVE.raf=requestAnimationFrame(loop);};loop();}catch(e){LIVE.meterOk=false;}
+}
+function liveCycle(){
+  if(!LIVE.on||!REC.stream)return;const mime=pickMime();let mr;try{mr=new MediaRecorder(REC.stream,mime?{mimeType:mime,audioBitsPerSecond:32000}:{});}catch(e){return;}
+  const parts=[],i=LIVE.idx++;LIVE.peak=0;mr.ondataavailable=e=>{if(e.data&&e.data.size)parts.push(e.data);};
+  mr.onstop=()=>{const blob=new Blob(parts,{type:mr.mimeType||mime||'audio/webm'});if(blob.size>2000&&mr._peak>0.006)liveSend(blob,i);};   // silence is not sent
+  LIVE.mr=mr;mr.start();
+  LIVE.timer=setTimeout(()=>{mr._peak=LIVE.meterOk?LIVE.peak:1;try{mr.stop();}catch(e){}liveCycle();},10000);
+}
+function liveGo(){if(!HEALTH||!HEALTH.engine||LIVE.on)return;LIVE.on=true;liveCycle();}
+function liveHalt(){LIVE.on=false;clearTimeout(LIVE.timer);const mr=LIVE.mr;if(mr&&mr.state!=='inactive'){mr._peak=LIVE.meterOk?LIVE.peak:1;try{mr.stop();}catch(e){}}LIVE.mr=null;}
+function liveEnd(){liveHalt();cancelAnimationFrame(LIVE.raf);try{LIVE.ctx&&LIVE.ctx.close();}catch(e){}LIVE.ctx=null;LIVE.level=0;}
+async function liveSend(blob,i){
+  const s=ST.solo,row={i,state:'wait',orig:'',en:'',ar:''};s.live.push(row);liveRender();
+  try{const r=await fetch(API+'/api/live/chunk',{method:'POST',headers:{'Content-Type':(blob.type||'audio/webm').split(';')[0]},body:blob});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'failed');
+    Object.assign(row,{state:'done',orig:j.text||'',en:j.en||j.text||''});s.voices=Math.max(s.voices||0,j.voices||0);
+    if(!row.orig)s.live=s.live.filter(x=>x!==row);else if(s.ltr&&s.ltarget==='ar')liveAr(row);
+  }catch(e){s.live=s.live.filter(x=>x!==row);}
+  liveRender();
+}
+function liveAr(row){if(row.ar||!row.en||row._ar)return;row._ar=true;api('/api/translate',{target:'ar',items:[row.en]}).then(j=>{row.ar=(j.items||[])[0]||'';liveRender();}).catch(()=>{row._ar=false;});}
+const liveRows=()=>(ST.solo.live||[]).slice().sort((a,b)=>a.i-b.i);
+const liveTextOf=row=>{const s=ST.solo;return !s.ltr?row.orig:s.ltarget==='ar'?(row.ar||row.en):row.en;};
+// Text is shown as paragraphs of about four sentences.
+function liveParas(){const out=[];let cur='',n=0;
+  for(const r of liveRows()){if(r.state!=='done')continue;const t=liveTextOf(r);if(!t)continue;cur+=(cur?' ':'')+t;n+=(t.match(/[.?!؟।。]+(\s|$)/g)||[]).length||1;if(n>=4){out.push(cur);cur='';n=0;}}
+  if(cur)out.push(cur);return out;}
+function liveBody(){
+  const s=ST.solo,ps=liveParas(),wait=liveRows().some(r=>r.state==='wait'),rec=s.phase==='meet'&&isListen();
+  if(!ps.length&&!wait)return `<div class="lvempty">${rec?`<b>Listening…</b><span>${HEALTH&&HEALTH.engine?'The first text appears in about 15 seconds.':'Recording. The text is written when you stop.'}</span>`:`<b>Press record.</b><span>New text appears here every 10 seconds, as paragraphs.</span>`}</div>`;
+  return ps.map((t,i)=>`<p dir="auto" class="${i===ps.length-1?'new':''}">${esc(t)}</p>`).join('')+(wait?`<div class="lvdots"><i></i><i></i><i></i></div>`:'');
+}
+function liveSide(){const s=ST.solo,v=$('#lvVoices');if(!v)return;const n=s.voices||0;
+  v.innerHTML=n?`<span class="lvd">${Array.from({length:Math.min(n,4)},(_,k)=>`<i style="--c:${C[k]}"></i>`).join('')}</span><b>${n}</b><small>${n===1?'voice':'voices'}</small>`:`<small>${isListen()&&s.phase==='meet'?'Listening':'No voices yet'}</small>`;}
+function liveRender(){const b=$('#lvText');if(!b)return;const stick=b.scrollHeight-b.scrollTop-b.clientHeight<90;b.innerHTML=liveBody();if(stick)b.scrollTop=b.scrollHeight;liveSide();}
+setInterval(()=>{const m=$('#lvMeter');if(!m)return;const s=ST.solo,on=isListen()&&s.phase==='meet'&&!s.paused,n=on?Math.round(Math.min(1,Math.sqrt(LIVE.level)*2.4)*LSEG):0;
+  for(let k=0;k<m.children.length;k++)m.children[k].classList.toggle('on',k<n);},90);
+const liveAllText=()=>liveParas().join('\n\n');
 function viewListen(){
   const s=ST.solo;
   if(s.phase!=='idle'&&!isListen())return capsheet(`<div class="eyebrow">Calls and videos</div><h1 class="lt">Listen</h1><p class="sub">A Solo meeting is in progress. Finish it before you start Listen.</p>`,`<button class="cta" data-tab="solo">Open Solo</button>`);
-  if(s.phase==='idle'){const ok=canListen(),k=s.lkind||'video';
-    return capsheet(
-    `<div class="eyebrow">Calls and videos on this computer</div><h1 class="lt">Listen</h1><p class="sub">Takes the sound straight from the tab or the computer, not through the speaker, and adds your microphone. The notes are written when you stop.</p>
-     <div class="lsrc"><span>${I('speaker','s')}Computer sound</span><i>+</i><span>${I('mic','s')}Your microphone</span></div>`,
-    `${serverNote()}
-     ${s.pending?`<div class="note">A recording is waiting to be sent. Open Solo to send it.</div>`:''}
-     ${ok?'':`<div class="note">On a phone, the video plays inside this page and the microphone listens to the loudspeaker. Paste the YouTube link below. Leaving this page stops the recording, so watch it here.</div>
-       <label class="fld"><span>Video link (YouTube)</span><input id="lisUrl" value="${esc(s.lurl||'')}" placeholder="Paste the link from Share" inputmode="url" autocomplete="off" autocapitalize="none"></label>`}
-     <div class="lopts" role="radiogroup" aria-label="What are you listening to">
-       <button class="lopt ${k==='video'?'on':''}" role="radio" aria-checked="${k==='video'}" data-act="listen-kind" data-k="video"><b>Video or lecture</b><small>Learning notes: summary, key lessons, terms and steps</small></button>
-       <button class="lopt ${k==='call'?'on':''}" role="radio" aria-checked="${k==='call'}" data-act="listen-kind" data-k="call"><b>Call or meeting</b><small>Minutes: who said what, decisions and action items</small></button></div>
-     ${ok?'':'<!--'}<button class="lsw ${s.lmic?'on':''}" role="switch" aria-checked="${!!s.lmic}" data-act="listen-mic"><span class="grow"><b>Add my microphone</b><small>${k==='call'?'Needed so your side of the call is in the notes.':'Anything you say is added to the notes.'}</small></span><i></i></button>${ok?'':'-->'}
-     <label class="fld"><span>Title</span><input id="soloTitle" value="${esc(s.title)}" placeholder="Optional" autocomplete="off"></label>
-     <button class="cta" data-act="listen-start">${I(ok?'speaker':'mic')}${ok?'Start listening':'Start listening with the microphone'}</button>
-     <p class="fine">${ok?'The browser asks what to share. Pick the tab that is playing and keep “Also share tab audio” on. Only the sound is recorded, never the picture.':'The phone asks to use the microphone. If you leave this page, the phone may stop the recording; the notes are then written from what was captured.'}</p>
-     <button class="btn2" data-act="listen-file">Use a saved audio or video file</button>
-     ${drawer('lis-how','How Listen works','',`<ol class="steps"><li>Press Start and pick the tab that is playing: a video, or a Meet, Teams or Zoom call in the browser.</li><li>Go and watch or talk. This page keeps listening in the background. Float the small controls over other windows if you like.</li><li>Press Stop, or “Stop sharing” in the browser bar.</li><li>The recording is sent once and the notes are written: learning notes for a video, minutes for a call.</li></ol>`)}
-     ${drawer('lis-tips','For clean notes','',`<ul class="ticks"><li>${I('check','s')}<span>Use headphones if your microphone is on, so it does not hear the loudspeaker.</span></li><li>${I('check','s')}<span>For a program outside the browser on Windows, share Entire screen with “Also share system audio”.</span></li><li>${I('check','s')}<span>A file you already have is quicker to upload than to play through.</span></li></ul>`)}`);}
-  if(s.phase==='meet')return capsheet(
-    `<div class="bar"><span class="recp ${s.paused?'paused':''}" id="sRec"><i></i><b>${s.paused?'PAUSED':'REC'}</b></span><span class="tm" id="sTime">${mmss(s.t)}</span><span class="grow"></span><span class="chipd">${s.lkind==='call'?'Call':'Video'}</span></div>
-     <h1 class="mt">${esc(s.title||'Listening')}</h1>
-     ${LIS.disp?'':`<div class="lsrc"><span>${I('mic','s')}Listening through the microphone</span></div><!--`}
-     <div class="lmeters"><div class="lm">${I('speaker','s')}<span>Computer sound</span><div class="lbar"><i id="lSys"></i></div></div>
-       ${LIS.mic?`<div class="lm">${I('mic','s')}<span>Your microphone</span><div class="lbar mic"><i id="lMic"></i></div></div>`:`<div class="lm off">${I('mic','s')}<span>Microphone off</span></div>`}</div>${LIS.disp?'':'-->'}
-     <p class="now" id="lQuiet" hidden>No sound from the computer. Is it playing?</p>`,
-    `<div class="pcard" style="padding:16px 18px"><b style="font-size:17px">Listening</b><p style="color:var(--fg2);margin-top:4px;font-size:15px">${LIS.disp?`Go to your ${s.lkind==='call'?'call':'video'}. This page keeps listening in the background. Come back and stop when you are done.`:(ytId(s.lurl)?'Press play on the video above. Keep the sound on the loudspeaker, not headphones, and stay on this page. Stop when the lecture ends.':`Play the ${s.lkind==='call'?'call':'video'} on a loudspeaker near this phone and keep this page on screen. Stop when you are done.`)}</p></div>
-     <p class="fine" id="sSaved">${savedTxt()}</p>
-     ${LIS.disp&&'documentPictureInPicture' in window?`<button class="btn2" data-act="listen-pip">Float the controls over other windows</button>`:''}
-     <div class="dock"><button class="dbt" data-act="solo-pause" id="sPause">${s.paused?I('play','s')+'Resume':I('pause','s')+'Pause'}</button><button class="dbt red" data-act="solo-end">${I('stop','s')}Stop and write notes</button></div>`);
-  return viewSolo(true);
+  if(s.phase!=='idle'&&s.phase!=='meet')return viewSolo(true);
+  const rec=s.phase==='meet',ok=canListen(),k=s.lkind||'video',tg=s.ltarget||'en';
+  const chip=(act,html,cls,attr)=>`<button class="lchip ${cls||''}" data-act="${act}" ${attr||''}>${html}</button>`;
+  return `<div class="lv ${rec?'rec':''} ${s.mini?'mini':''}">
+    <section class="lvcard">
+      <header class="lvh"><div class="lvt"><b>${rec?(s.paused?'Paused':'Live transcript'):'Listen'}</b><small>${k==='call'?'Call or meeting':'Video or lecture'}${s.ltr?' · in '+(tg==='ar'?'Arabic':'English'):''}</small></div>
+        <button class="ltog ${s.ltr?'on':''}" role="switch" aria-checked="${!!s.ltr}" data-act="lv-tr" aria-label="Translate to ${tg==='ar'?'Arabic':'English'}"><span>${tg==='ar'?'AR':'EN'}</span><i></i></button>
+        <button class="lvib" data-act="lv-copy" aria-label="Copy the text">${I('copy','s')}</button>
+        <button class="lvib" data-act="lv-mini" aria-label="${s.mini?'Full size':'Make it small'}">${li(s.mini?LIc.max:LIc.min)}</button></header>
+      <div class="lvtext" id="lvText">${liveBody()}</div>
+    </section>
+    <div class="lchips">
+      <span class="lchip stat">${li(LIc.clock)}<b class="tm" id="sTime">${mmss(rec?s.t:0)}</b></span>
+      <span class="lchip stat"><b id="sSaved">${rec?savedTxt():'0.0 MB'}</b></span>
+      ${rec?chip('solo-pause',s.paused?I('play','s')+'Resume':I('pause','s')+'Pause','','id="sPause"'):''}
+      ${chip('lv-lang',li(LIc.globe)+(tg==='ar'?'To Arabic':'To English'))}
+      ${chip('lv-txt',li(LIc.dl)+'TXT')}${chip('lv-doc',li(LIc.dl)+'Word')}
+      ${rec||ok?'':chip('lv-link',li(LIc.link)+(ytId(s.lurl)?'Change video':'YouTube link'))}
+      ${rec?'':chip('listen-file',li(LIc.file)+'Audio file')}
+      ${rec?'':chip('lv-kind',k==='call'?'Call':'Lecture','onk')}
+      ${rec||!ok?'':chip('listen-mic',I('mic','s')+(s.lmic?'Mic on':'Mic off'),s.lmic?'onc':'')}
+      ${rec&&LIS.disp&&'documentPictureInPicture' in window?chip('listen-pip','Float'):''}
+      ${chip('lv-help',li(LIc.help)+'How it works')}
+    </div>
+    <div class="lvbar"><div class="lmeter" id="lvMeter" aria-hidden="true">${'<i></i>'.repeat(LSEG)}</div>
+      <button class="lrec ${rec?'on':''}" data-act="${rec?'solo-end':'listen-start'}" aria-label="${rec?'Stop and write notes':'Start recording'}">${rec?I('stop'):I('mic')}</button>
+      <div class="lvoices" id="lvVoices"></div></div>
+  </div>`;
 }
 function soloNow(){
   const s=ST.solo;
@@ -907,13 +960,15 @@ function stopPlay(){if(ST.rep.play){clearInterval(ST.rep.play);ST.rep.play=null;
 /* ================= render ================= */
 function render(){
   const cr=ST.rep&&ST.rep.id&&ST.reports.find(r=>r.id===ST.rep.id);if(cr&&cr.real)saveReport(cr);
-  const app=$('#app'); app.className='app '+(ST.tab==='solo'||ST.tab==='listen'?'t-dark':'t-mix');
+  const app=$('#app'); const lf=ST.tab==='listen'&&(ST.solo.phase==='idle'||(isListen()&&ST.solo.phase==='meet'));
+  app.className='app '+(ST.tab==='solo'||ST.tab==='listen'?'t-dark':'t-mix')+(lf?' lis-fixed'+(ST.solo.mini?' lis-mini':''):'');
   $$('.tabs button').forEach(b=>{const on=b.dataset.tab===ST.tab;b.classList.toggle('on',on);b.setAttribute('aria-selected',on);});
   const d=ST.reports.filter(r=>r.status==='draft').length, bd=$('#repBadge'); bd.textContent=d; bd.classList.toggle('on',d>0&&ST.tab!=='reports');
   stopPlay();
   $('#view').innerHTML = ST.tab==='solo'?viewSolo():ST.tab==='listen'?viewListen():ST.tab==='group'?viewGroup():viewReports();
   if(ST.tab==='solo'||ST.tab==='listen') syncSolo();
   syncPlayer();
+  if(lf){liveSide();const b=$('#lvText');if(b)b.scrollTop=b.scrollHeight;}
   if(ST.tab==='group') syncGroup();
   ST.rep.shim=false;
 }
@@ -950,11 +1005,12 @@ const ACT={
    const b=$('#sPause');if(b)b.innerHTML=s.paused?I('play','s')+'Resume':I('pause','s')+'Pause';
    const r=$('#sRec');if(r){r.classList.toggle('paused',s.paused);r.querySelector('b').textContent=s.paused?'PAUSED':'REC';}
    if(LIS.pip){const d=LIS.pip.document;d.getElementById('pP').textContent=s.paused?'Resume':'Pause';d.getElementById('pD').classList.toggle('pz',s.paused);}
+   if(isListen()){s.paused?liveHalt():liveGo();render();}
    syncSolo();},
  'solo-end'(){if(isListen())return sheet(`<h3>Stop listening?</h3><p>Recording stops. The audio is sent once and the notes are written.</p><div class="stk"><button class="btnr" data-act="solo-end-ok">Stop and write notes</button><button class="btng" data-act="close">Keep listening</button></div>`);
    sheet(`<h3>End this meeting?</h3><p>Recording stops. The audio is sent once, transcribed, and each voice is named from the introductions.</p><div class="stk"><button class="btnr" data-act="solo-end-ok">End meeting</button><button class="btng" data-act="close">Keep recording</button></div>`);},
  async 'solo-end-ok'(){closeSheet();const s=ST.solo;if(!(s.phase==='intro'||s.phase==='meet'))return;if(s.phase==='intro')s.introEndMs=s.t*1000;s.paused=false;
-   s.micFlags=isListen()?LIS.flags.slice():null;
+   s.micFlags=isListen()?LIS.flags.slice():null;if(isListen())liveEnd();
    const mid=REC.mid;s.phase='proc';s.step='save';render();
    await recStop();await DB.patch(mid,{state:'ended',durationSec:s.t,introEndMs:s.introEndMs}).catch(()=>{});
    processMeeting(mid);},
@@ -962,6 +1018,25 @@ const ACT={
  'solo-retry'(){const s=ST.solo;processMeeting(s.mid,s.mid?null:s.blob);},
  'solo-file'(){FILE_MODE='solo';$('#fileIn').click();},
  'listen-file'(){FILE_MODE='listen';$('#fileIn').click();},
+ 'lv-kind'(){const s=ST.solo;s.lkind=s.lkind==='call'?'video':'call';render();toast(s.lkind==='call'?'Call or meeting: you get minutes':'Video or lecture: you get learning notes');},
+ 'lv-mini'(){ST.solo.mini=!ST.solo.mini;render();},
+ 'lv-tr'(){const s=ST.solo;s.ltr=!s.ltr;if(s.ltr&&s.ltarget==='ar')s.live.forEach(liveAr);render();},
+ 'lv-lang'(){const s=ST.solo;s.ltarget=s.ltarget==='ar'?'en':'ar';s.ltr=true;if(s.ltarget==='ar')s.live.forEach(liveAr);render();toast('Showing the text in '+(s.ltarget==='ar'?'Arabic':'English'));},
+ async 'lv-copy'(){const t=liveAllText();if(!t)return toast('Nothing to copy yet');try{await navigator.clipboard.writeText(t);toast('Text copied');}catch(e){toast('Could not copy on this browser');}},
+ 'lv-txt'(){const t=liveAllText();if(!t)return toast('Nothing to save yet');saveAudio(new Blob([t+'\n'],{type:'text/plain;charset=utf-8'}),'ForgeHype_Listen_'+new Date().toISOString().slice(0,10)+'.txt');},
+ 'lv-doc'(){const ps=liveParas();if(!ps.length)return toast('Nothing to save yet');
+   const html=`<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>Listen transcript</title></head><body style="font-family:Calibri,Arial;font-size:12pt"><h2>${esc(ST.solo.title||'Listen transcript')}</h2><p style="color:#666">${new Date().toLocaleString()}</p>${ps.map(t=>`<p dir="auto">${esc(t)}</p>`).join('')}</body></html>`;
+   saveAudio(new Blob(['﻿'+html],{type:'application/msword'}),'ForgeHype_Listen_'+new Date().toISOString().slice(0,10)+'.doc');},
+ 'lv-link'(){sheet(`<h3>Watch a YouTube video here</h3><p>In YouTube tap Share, copy the link and paste it. The video plays at the top of this page while the text is written below it.</p><div class="stk"><label class="fld"><span>Video link</span><input id="lisUrl" value="${esc(ST.solo.lurl||'')}" placeholder="https://youtu.be/…" inputmode="url" autocomplete="off" autocapitalize="none"></label><button class="btnk" data-act="lv-link-ok">Use this video</button>${ytId(ST.solo.lurl)?'<button class="btng" data-act="lv-link-no">Remove the video</button>':''}<button class="btng" data-act="close">Cancel</button></div>`);},
+ 'lv-link-ok'(){const s=ST.solo;if(!ytId(s.lurl))return toast('That is not a YouTube video link');closeSheet();render();},
+ 'lv-link-no'(){ST.solo.lurl='';closeSheet();render();},
+ 'lv-help'(){sheet(`<h3>How Listen works</h3><div class="helpsc"><ol class="steps"><li>Press the round button to start. On a phone, allow the microphone. On a computer, pick the tab that is playing and keep “Also share tab audio” on.</li><li>The bars on the left show the volume being captured. If they stay empty, nothing is being heard.</li><li>About every 10 seconds, new text is added to the card. After four or five sentences it becomes a paragraph.</li><li>Switch on the EN toggle to see the text in English. “To Arabic” changes the language.</li><li>The number on the right is how many different voices were heard.</li><li>Copy, TXT and Word save the text you see.</li><li>Press the button again to stop. The whole recording is then transcribed once more in full quality, and you can create the notes.</li></ol>
+   <p><b>On a phone.</b> Tap “YouTube link” to play the video inside this page. Keep the sound on the loudspeaker and stay on this page, because the phone stops the recording if you leave.</p>
+   <p><b>Small view.</b> The corner button shrinks Listen to the bottom third of the screen, with the video filling the rest.</p>
+   <p><b>Calls.</b> Tell people they are being recorded before you start.</p></div><div class="stk"><button class="btnk" data-act="close">Got it</button></div>`);},
+ 'yt-p'(){ytCmd(YT.state===1?'pauseVideo':'playVideo');},
+ 'yt-b'(){ytCmd('seekTo',[Math.max(0,YT.t-10),true]);},
+ 'yt-f'(){ytCmd('seekTo',[YT.t+10,true]);},
  'listen-kind'(el){ST.solo.lkind=el.dataset.k;render();},
  'listen-mic'(){ST.solo.lmic=!ST.solo.lmic;render();},
  'listen-pip'(){listenPip();},
@@ -972,13 +1047,13 @@ const ACT={
    closeSheet();const s=ST.solo;if(s.phase!=='idle')return;
    if(!canListen()&&(s.lurl||'').trim()&&!ytId(s.lurl))return toast('That is not a YouTube video link. Paste the link from Share, or leave it empty.');
    s.mode='listen';
-   try{if(canListen()){const stream=await listenCapture(s.lmic);await recStart(null,{stream});}else await recStart();}
+   try{if(canListen()){const stream=await listenCapture(s.lmic);await recStart(null,{stream});LIVE.meterOk=!!LIS.node;}else{await recStart();liveAnalyse(REC.stream);}}
    catch(e){listenCleanup();
      if(e.name==='NotAllowedError'&&!e.noSound)return toast('Nothing was shared, so Listen did not start');
      sheet(e.noSound?`<h3>No sound was shared</h3><p>In the browser's share window, pick the <b>tab</b> that is playing and keep <b>Also share tab audio</b> switched on. A single app window cannot share its sound. On Windows, <b>Entire screen</b> with <b>Also share system audio</b> works for any program.</p><div class="stk"><button class="btnk" data-act="listen-go">Try again</button><button class="btng" data-act="close">Cancel</button></div>`
        :`<h3>Listen could not start</h3><p>${esc(e.message||String(e))}</p><div class="stk"><button class="btnk" data-act="close">OK</button></div>`);return;}
-   Object.assign(s,{phase:'meet',t:0,paused:false,introEndMs:0,announceEndMs:0,startedAt:Date.now(),speakers:[],result:null,blob:null,rid:null,mid:REC.mid,pending:null,micFlags:null});
-   render();window.scrollTo(0,0);listenPip(true);
+   Object.assign(s,{phase:'meet',t:0,paused:false,introEndMs:0,announceEndMs:0,startedAt:Date.now(),speakers:[],result:null,blob:null,rid:null,mid:REC.mid,pending:null,micFlags:null,live:[],voices:0});LIVE.idx=0;
+   render();window.scrollTo(0,0);liveGo();listenPip(true);
  },
  'solo-save-audio'(){saveAudio(ST.solo.blob,audioName());},
  async 'solo-continue'(){const s=ST.solo,m=s.pending;if(!m)return;
