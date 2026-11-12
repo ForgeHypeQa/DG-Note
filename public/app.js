@@ -91,7 +91,7 @@ function fresh(){
    group:{phase:'lobby',live:true,joined:false,sim:false,elapsed:23*60+14,paused:false,hands:[],sharing:null,stageOpen:true,chat:[],qs:[],talk:'sara',unChat:0,unQs:0,
      people:['sara','priya','noura','fatima','joseph','rami'],pi:0,rid:null,
      upcoming:[{t:'Medication Safety Review',w:'Tomorrow · 11:00',by:'Noura'},{t:'Monthly Quality & Incidents',w:'Thu 12 Nov · 14:00',by:'Rami'}]},
-   reports:seedReports(), rep:{id:null,lang:'en',edit:false,filter:'all',q:'',focus:'sum',play:null,dictating:false,di:0}};
+   reports:seedReports(), rep:{id:null,lang:'orig',edit:false,filter:'all',q:'',focus:'sum',play:null,dictating:false,di:0}};
 }
 const curRep=()=>ST.reports.find(r=>r.id===ST.rep.id);
 
@@ -157,6 +157,8 @@ const REC={stream:null,mr:null,mime:'',mid:null,i:0,part:0,bytes:0,saves:[],ctx:
 function pickMime(){for(const m of ['audio/webm;codecs=opus','audio/mp4','audio/ogg;codecs=opus','audio/webm'])if(window.MediaRecorder&&MediaRecorder.isTypeSupported(m))return m;return '';}
 const recording=()=>REC.mr&&REC.mr.state!=='inactive';
 // One recording runs at a time. It belongs to Solo (the microphone) or Listen (the computer's sound).
+const autoKey=()=>'dg-auto-report-'+(ME_USER?.id||'x');
+const autoReport=()=>{try{return localStorage.getItem(autoKey())==='1';}catch(e){return false;}};
 const isListen=()=>ST.solo.mode==='listen';
 const onRecTab=()=>ST.tab===(isListen()?'listen':'solo');
 let FILE_MODE='solo';
@@ -338,7 +340,7 @@ function viewSolo(fromListen){
     `<div class="sech"><h2>Speakers</h2><span>${(n=>n+(n===1?' person':' people'))(s.speakers.filter(x=>!x.mergedInto).length)}</span></div>
      <div class="stack" id="sStack">${s.speakers.map((x,i)=>x.mergedInto?'':cardHTML(i)).join('')}</div>
      <datalist id="rosterNames">${ROSTER.map(p=>`<option value="${esc(p.name)}">`).join('')}</datalist>
-     <button class="cta" data-act="solo-open">Save names and create report</button>
+     <button class="cta" data-act="solo-open">${autoReport()?'Save names and create report':'Save names and check the transcript'}</button>
      <button class="btn2" data-act="solo-save-audio">Save the audio file</button>
      <button class="btn2" data-act="solo-new">${L?'Listen again':'New Solo meeting'}</button>`);
   // intro + meet
@@ -588,7 +590,7 @@ async function translateReport(r,target){
     if(items.length){const j=await api('/api/translate',{target,items});j.items.forEach((t,k)=>put[k](t));}
     out.txDone=true;r.tr[target]=out;saveReport(r);
   }catch(e){
-    if(!r.tr[target]||r.tr[target].v!==v){ST.rep.lang='en';}
+    if(!r.tr[target]||r.tr[target].v!==v){ST.rep.lang='orig';}
     sheet(`<h3>The Arabic version could not be made</h3><p>${esc(e.message)}</p><div class="stk"><button class="btnk" data-act="close">OK</button></div>`);
   }
   ST.rep.translating=false;if(curRep()===r)render();
@@ -835,7 +837,7 @@ function repDetail(r){
     <p class="meta">${r.when} · ${r.time} · ${r.dur}<br>Called by ${esc(r.by)}</p>
     ${!lay||lay.some(e=>e.field==='summary')?`<div class="sumh">${esc(T('summary',L.sum))}</div>`:''}
     ${mins==='working'?`<div class="writing"><span class="gdots"><i></i><i></i><i></i></span>Writing the meeting report…</div>`
-      :mins!=='done'?`<p class="sub" style="max-width:none">${mins==='error'?esc(r.minutesErr||'The report could not be written.'):'The transcript is ready. Create the meeting report: summary, decisions, action items and open questions.'}</p><button class="cta" style="margin-top:14px" data-act="rep-minutes">${mins==='error'?'Try again':'Create the meeting report'}</button><button class="tplline" data-act="tpl-choose">Template: <b>${esc(tplById(r.templateId||getDefaultTplId()).name)}</b> · change</button>`:''}
+      :mins!=='done'?`<p class="sub" style="max-width:none">${mins==='error'?esc(r.minutesErr||'The report could not be written.'):'The transcript is ready. Check it below, then create the meeting report.'}</p><button class="cta" style="margin-top:14px" data-act="rep-minutes">${mins==='error'?'Try again':'Create the meeting report'}</button><button class="tplline" data-act="tpl-choose">Template: <b>${esc(tplById(r.templateId||getDefaultTplId()).name)}</b> · change</button>`:''}
     <ul class="sum ${rtl?'rtl':''} ${ST.rep.shim?'shim':''}" ${rtl?'lang="ar"':''}>${r.sum.map((s,i)=>`<li><span ${E('s'+i,'sum')}>${txt('s'+i,s,tr&&tr.sum[i])}</span></li>`).join('')}${added('sum')}</ul>
     <div class="sumh">Languages detected</div><p class="langs">${repLangs(r).map(langName).join(' · ')}</p>
     <div class="rchips">${r.real&&mins==='done'&&r.status==='draft'?`<button class="rchip" data-act="rep-minutes">↻ Write the report again</button><button class="rchip" data-act="tpl-choose">Template: ${esc(r.templateName||tplById(r.templateId||'standard').name)} ▾</button>`:''}${n&&lang==='en'?`<button class="rchip u1" data-act="u-first">${n} unclear word${n>1?'s':''} · tap the orange text</button>`:''}${r.hist.length?`<span class="rchip">${r.hist.length} change${r.hist.length>1?'s':''} · originals kept</span>`:''}</div>`;
@@ -844,11 +846,11 @@ function repDetail(r){
   const act=r.act.map((a,i)=>{const p=who(a.p),t=tr&&tr.act[i];return `<div class="act"><div class="at ${rtl?'rtl':''}" ${rtl?'dir="rtl" lang="ar"':''} ${E('a'+i,'act')}>${txt('a'+i,a.t,t&&t.t)}</div><div class="am"><span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span><span>${esc((t?t.due:a.due)||'No date')}</span></div></div>`;}).join('');
   const qs=r.qs.map((q,i)=>{const p=who(q.p),t=tr&&tr.qs[i];return `<div class="act"><div class="at" ${rtl&&t?'dir="rtl" lang="ar"':''}>${esc(t||q.t)}</div><div class="am"><span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span><span>Open</span></div></div>`;}).join('');
   const ppl=`<p class="note" style="margin-bottom:8px">${r.real?'Named from the introductions. Anyone who didn’t introduce themselves is listed as Speaker 1, 2… Tap a person to change the name.':r.kind==='solo'?'Named from the voice introductions at the start.':'Named from each person’s login on their own phone.'} ${r.status==='sent'?'Emailed '+esc(r.sentAt)+'.':'The report is emailed to everyone listed.'}</p>`+r.people.map((p,k)=>`<${r.real?`button data-act="rep-person" data-p="${k}"`:'div'} class="prow ${r.real?'tap':''}"><span class="av lg" style="--c:${p.c}">${ini(p.n)}</span><div class="grow"><b dir="auto">${esc(p.n)}</b>${[p.r,p.d,p.o].filter(Boolean).length?`<small dir="auto">${esc([p.r,p.d,p.o].filter(Boolean).join(' · '))}</small>`:''}${p.e||p.ph?`<small>${[p.e,p.ph].filter(Boolean).map(esc).join(' · ')}</small>`:''}${r.real&&!p.e?`<span class="addmail" data-act="rep-person" data-p="${k}" data-focus="email">+ Add email</span>`:(!r.real&&!p.e?'<small>No email on file</small>':'')}</div>${r.real?I('fwd','s'):''}</${r.real?'button':'div'}>`).join('');
-  const tx=`<p class="note">${lang==='orig'?'Exactly as spoken, in the original languages, with your edits. ':lang==='ar'&&r.real?(tr&&!tr.txDone?'Translating the transcript… lines show in English until it is ready. ':'Shown in Arabic. Lines first said in Arabic are shown as spoken. '):r.real?(onlyEnglish(r)?'':'Anything not said in English is shown in English, with the original underneath. '):'Clean transcript: grammar fixed and filler words removed. '}${lang==='orig'||lang==='ar'?'':lang!=='en'?'Shown in English with the original words underneath.':n?'Orange words were unclear in the audio. Tap one to check it.':'Tap a name to change who said it.'}</p>`+r.tx.map((l,i)=>{const p=who(l.p);return `<div class="txl"><div class="th">${r.real?`<button class="sp" style="--c:${p.c}" data-act="rep-person" data-p="${l.p}" aria-label="Rename ${esc(p.n)}">${esc(first(p.n))}</button>`:`<span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span>`}<span>${l.t}</span></div>${(()=>{
+  const tx=`<p class="note">${lang==='orig'?'Exactly as spoken, in the original languages, with your edits. ':lang==='ar'&&r.real?(tr&&!tr.txDone?'Translating the transcript… lines show in English until it is ready. ':'Shown in Arabic. Lines first said in Arabic are shown as spoken. '):r.real?(onlyEnglish(r)?'':'Shown in English. Tap Orig to see it as spoken. '):'Clean transcript: grammar fixed and filler words removed. '}${lang==='orig'||lang==='ar'?'':lang!=='en'?'Shown in English with the original words underneath.':n?'Orange words were unclear in the audio. Tap one to check it.':'Tap a name to change who said it.'}</p>`+r.tx.map((l,i)=>{const p=who(l.p);return `<div class="txl"><div class="th">${r.real?`<button class="sp" style="--c:${p.c}" data-act="rep-person" data-p="${l.p}" aria-label="Rename ${esc(p.n)}">${esc(first(p.n))}</button>`:`<span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span>`}<span>${l.t}</span></div>${(()=>{
       const isAr=l.o&&/[\u0600-\u06FF]/.test(l.o);
       if(lang==='orig')return `<div class="tt" dir="auto"${isAr?' lang="ar"':''}>${l.o?esc(l.o):rt(r,'t'+i,l.s)}</div>`;
       if(lang==='ar'&&r.real)return `<div class="tt" dir="rtl" lang="ar">${esc(isAr&&r.ed['t'+i]==null?l.o:(tr&&tr.tx&&tr.tx[i])||plain(r,l.s))}</div>`;
-      return `<div class="tt" ${E('t'+i,'tx')}>${rt(r,'t'+i,l.s)}</div>${l.o?`<div class="to" dir="auto"${isAr?' lang="ar"':''}>${esc(l.o)}</div>`:''}`;})()}</div>`;}).join('');
+      return `<div class="tt" ${E('t'+i,'tx')}>${rt(r,'t'+i,l.s)}</div>${l.o&&!r.real?`<div class="to" dir="auto"${isAr?' lang="ar"':''}>${esc(l.o)}</div>`:''}`;})()}</div>`;}).join('');
   let seed=7;const rnd=()=>{seed=(seed*16807)%2147483647;return seed/2147483647;};
   const bars=r.tx.map(l=>Array.from({length:Math.max(4,Math.round(l.s.length/12))},()=>`<i style="--c:${who(l.p).c};height:${20+Math.round(rnd()*80)}%"></i>`).join('')+'<i style="--c:#D5D2D0;height:8%"></i>').join('');
   const rec=r.real?((r.audios||[]).length?(r.audios.length>1?`<p class="note" style="margin-bottom:8px">Recorded in ${r.audios.length} parts because the phone paused the recording. The transcript covers all parts.</p>`:'')+spTimeline(r)+r.audios.map((u,k)=>`${r.audios.length>1?`<b style="display:block;font-size:13px;margin:8px 0 4px">Part ${k+1}</b>`:''}<audio class="aud" controls preload="metadata" src="${u}"></audio>`).join('')+`<button class="btn2" style="margin-top:10px" data-act="rep-dl">Save the audio file${r.audios.length>1?'s':''}</button><button class="btn2" style="margin-top:8px" data-act="rep-txt">Save the transcript (.txt)</button><button class="btn2 danger" style="margin-top:8px" data-act="rep-del">Delete this meeting from the phone</button><p class="fine" style="text-align:start;margin-top:8px">Saved on this phone. The ForgeHype Meet server deletes its copy after transcription.</p>`:'<p class="note">The audio stays on the phone that recorded it.</p>'):`<div style="display:flex;gap:12px;align-items:center"><button class="playb" data-act="rep-play" aria-label="Play recording">${I(ST.rep.play?'pause':'play')}</button><div class="grow"><b style="font-size:15px">${esc(r.title.replace(/[^A-Za-z0-9]+/g,'_'))}.mp3</b><div style="font-size:13px;color:var(--fg2)">${r.dur} · ${r.people.length} speakers · kept for 30 days</div></div></div><div class="wavebars" id="wave">${bars}</div><p class="fine" style="text-align:start;margin-top:8px">Colours show who is speaking. Playback is simulated in this prototype.</p>`;
@@ -857,7 +859,7 @@ function repDetail(r){
     :r.status==='sent'?`<span class="sentl">${I('check','s')}${r.real?'Approved':'Sent to '+r.people.filter(p=>p.e).length+' people'}</span><button class="dbt ic" data-act="rep-copy" aria-label="Copy summary">${I('copy','s')}</button>`
     :`<button class="dbt ic" data-act="rep-copy" aria-label="Copy summary">${I('copy','s')}</button><button class="dbt acc" data-act="rep-send">Approve &amp; send</button>`;
   return capsheet(cap,
-    `${r.real&&lang==='orig'?`<p class="note">Transcript as spoken. The report itself is written in English. <button data-act="rep-en" style="font-weight:700;color:var(--accink)">Back to English</button></p>`:''}
+    `${r.real&&lang==='orig'?(onlyEnglish(r)?'':`<p class="note">Transcript as spoken. The report itself is written in English. <button data-act="rep-en" style="font-weight:700;color:var(--accink)">Show the transcript in English</button></p>`):''}
      ${lang!=='en'&&lang!=='orig'&&tr?`<p class="note">Translated from English by AI. The English original is kept. <button data-act="rep-en" style="font-weight:700;color:var(--accink)">Show original</button></p>`:''}
      ${ed&&r.real?`<p class="note">Tap any transcript line to change it. Changes are saved in the change history.</p>`:ed?`<p class="note">Tap any text to change it, or use Dictate. Dictated words are cleaned up for grammar and spelling.</p>`:''}
      ${lay?lay.filter(e=>e.field!=='summary').map(e=>{
@@ -909,6 +911,7 @@ function render(){
 /* ================= actions ================= */
 const ACT={
  account(){openAccount();},
+ 'set-auto'(el){const on=!autoReport();try{localStorage.setItem(autoKey(),on?'1':'0');}catch(e){}el.classList.toggle('on',on);el.setAttribute('aria-checked',on);toast(on?'Reports will be written automatically':'Reports wait until you press Create the meeting report');if(!$('#bsheet.on'))return;render();},
  async 'claude-check'(){const o=$('#ccOut');if(!o)return;o.innerHTML='<p style="font-size:14px">Checking…</p>';
    try{const r=await fetch(API+'/api/admin/claude-check');const j=await r.json();
      o.innerHTML=!j.keySet?'<div class="warnbox">No ANTHROPIC_API_KEY on the server.</div>':j.checks.map(c=>`<div class="${c.ok?'note':'warnbox'}" style="margin-top:6px">${c.kind==='report'?'Report writer':'Arabic translation'} · ${esc(c.model)}: ${c.ok?'working':'not working'}${c.ok?'':'<br><small>'+esc(c.error||'')+'</small>'}</div>`).join('');}
@@ -990,7 +993,7 @@ const ACT={
    saveSoloSpeakers();},
  'solo-open'(){const s=ST.solo;const r=buildRealReport();ST.reports=[r,...ST.reports.filter(x=>x.id!==r.id)];saveReport(r);
    Object.assign(s,{phase:'idle',t:0,paused:false,introEndMs:0,speakers:[],result:null,title:'',rid:null,err:'',mid:null,parts:null,blob:null});
-   openReport(r.id);ST.open['r-tx']=false;render();window.scrollTo(0,0);makeMinutes(r);},
+   openReport(r.id);ST.open['r-tx']=!autoReport();render();window.scrollTo(0,0);if(autoReport())makeMinutes(r);},
  'rep-seek'(el,e){const a=$('.aud'),b=el.getBoundingClientRect();if(!a||!b.width)return;a.currentTime=Math.max(0,Math.min(1,(e.clientX-b.left)/b.width))*(+el.dataset.tot)/1000;a.play().catch(()=>{});},
  'rep-l'(el){saveAll();const l=el.dataset.l;ST.rep.lang=l;if(l!=='en')ST.rep.edit=false;ST.rep.shim=true;if(l==='ar')ST.open['r-tx']=ST.open['r-tx']||false;render();},
  'tpl-manage'(){openTemplates(null);},
@@ -1039,7 +1042,7 @@ const ACT={
  'g-create'(){const t=$('#nmTitle').value.trim()||'Untitled meeting',n=$$('.invc .on').length;ST.group.upcoming.unshift({t,w:'Today · 15:00',by:'you'});ST.open['g-up']=true;closeSheet();render();toast(`Invites sent to ${n} people by email and WhatsApp`);},
  /* ---- reports ---- */
  'rep-open'(el){openReport(el.dataset.id);},
- 'rep-back'(){saveAll();ST.rep.id=null;ST.rep.edit=false;ST.rep.lang='en';render();window.scrollTo(0,0);},
+ 'rep-back'(){saveAll();ST.rep.id=null;ST.rep.edit=false;ST.rep.lang='orig';render();window.scrollTo(0,0);},
  'rep-filter'(el){ST.rep.filter=el.dataset.f;render();},
  'rep-edit'(){saveAll();ST.rep.edit=!ST.rep.edit;if(ST.rep.edit){ST.open['r-dec']=true;}render();},
  'rep-lang'(){saveAll();sheet(`<h3>Show this report in</h3><p>Reports are written in English. Translate for anyone who needs it.</p><div style="margin-top:10px">${Object.keys(LANG).map(k=>`<button class="lrowb" data-act="rep-setlang" data-l="${k}"><span class="grow">${LANG[k].full}</span>${ST.rep.lang===k?I('check'):''}</button>`).join('')}<button class="lrowb" disabled>60+ more languages in the live app</button></div>`);},
@@ -1100,7 +1103,7 @@ const ACT={
  },
 };
 function saveAll(){$$('[data-ek]').forEach(saveEdit);}
-function openReport(id){ST.tab='reports';ST.rep.id=id;ST.rep.lang='en';ST.rep.edit=false;['r-dec','r-act','r-qs','r-ppl','r-tx','r-rec','r-hist'].forEach(k=>delete ST.open[k]);render();window.scrollTo(0,0);}
+function openReport(id){ST.tab='reports';ST.rep.id=id;ST.rep.lang=ST.reports.find(x=>x.id===id)?.real?'orig':'en';ST.rep.edit=false;['r-dec','r-act','r-qs','r-ppl','r-tx','r-rec','r-hist'].forEach(k=>delete ST.open[k]);render();window.scrollTo(0,0);}
 const FORM={
  async login(){
    const btn=$('#lgBtn'),err=$('#lgErr');err.hidden=true;btn.disabled=true;btn.textContent='Signing in…';
@@ -1172,7 +1175,7 @@ async function signOut(){
 async function openAccount(){
   const u=ME_USER;if(!u)return;
   const head=`<div style="display:flex;gap:14px;align-items:center"><span class="av lg" style="--c:${u.role==='admin'?'#FF5D00':'#45D3C5'};width:54px;height:54px;font-size:16px">${esc(u.short)}</span><div><h3>${esc(u.name)}</h3><p style="margin:0">${u.role==='admin'?'Admin · full access':'Guest account'}</p></div></div>`;
-  const foot=`<div class="stk">${u.role==='admin'?'<button class="btng" data-act="claude-check">Check meeting reports (Claude)</button><div id="ccOut"></div>':''}${installBtn('btng')}<button class="btnk" data-act="sign-out">Sign out</button>${u.role==='admin'?'<button class="btng" data-act="restart">Reset the sample data</button>':''}<button class="btng" data-act="close">Close</button></div>`;
+  const foot=`<div class="stk"><button class="lsw ${autoReport()?'on':''}" role="switch" aria-checked="${autoReport()}" data-act="set-auto"><span class="grow"><b>Create the report automatically</b><small>Off: you check the transcript first, then press Create the meeting report.</small></span><i></i></button>${u.role==='admin'?'<button class="btng" data-act="claude-check">Check meeting reports (Claude)</button><div id="ccOut"></div>':''}${installBtn('btng')}<button class="btnk" data-act="sign-out">Sign out</button>${u.role==='admin'?'<button class="btng" data-act="restart">Reset the sample data</button>':''}<button class="btng" data-act="close">Close</button></div>`;
   if(u.role!=='admin'){sheet(head+`<p>Signed in on this device. Your meetings stay on this phone until the database is connected.</p>`+foot);return;}
   sheet(head+`<p id="admLoad">Loading who is online…</p>`+foot);
   try{

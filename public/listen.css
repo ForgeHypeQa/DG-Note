@@ -35,3 +35,8 @@
 .sptl b{position:absolute;top:0;bottom:0;width:2.5px;background:var(--fg);left:0;display:none;box-shadow:0 0 0 1.5px var(--cardbg)}
 .sptl b.on{display:block}
 .txl.now{background:color-mix(in srgb,var(--acc) 10%,transparent);border-radius:12px;box-shadow:-8px 0 0 color-mix(in srgb,var(--acc) 10%,transparent),8px 0 0 color-mix(in srgb,var(--acc) 10%,transparent)}
+
+/* settings switch inside a sheet */
+.bsheet .lsw{background:var(--paper);border-color:transparent;color:var(--ink);text-align:start}
+.bsheet .lsw small{color:var(--mut)}
+.bsheet .lsw>i{background:#C9C5C3}.bsheet .lsw.on>i{background:var(--acc)}
