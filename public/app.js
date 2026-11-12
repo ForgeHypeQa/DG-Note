@@ -439,24 +439,25 @@ function viewListen(){
      <div class="lsrc"><span>${I('speaker','s')}Computer sound</span><i>+</i><span>${I('mic','s')}Your microphone</span></div>`,
     `${serverNote()}
      ${s.pending?`<div class="note">A recording is waiting to be sent. Open Solo to send it.</div>`:''}
-     ${ok?'':`<div class="warnbox">Listen works in Chrome or Edge on a computer. A phone does not let a web page take the sound it is playing. On a phone, use Solo with the speaker on, or send a saved file below.</div>`}
+     ${ok?'':`<div class="note">On a phone, Listen hears through the microphone, because phones do not let a web page take the sound they play. Play the video or call on a loudspeaker near this phone and keep this page on screen. For a direct, cleaner signal use Chrome or Edge on a computer.</div>`}
      <div class="lopts" role="radiogroup" aria-label="What are you listening to">
        <button class="lopt ${k==='video'?'on':''}" role="radio" aria-checked="${k==='video'}" data-act="listen-kind" data-k="video"><b>Video or lecture</b><small>Learning notes: summary, key lessons, terms and steps</small></button>
        <button class="lopt ${k==='call'?'on':''}" role="radio" aria-checked="${k==='call'}" data-act="listen-kind" data-k="call"><b>Call or meeting</b><small>Minutes: who said what, decisions and action items</small></button></div>
-     <button class="lsw ${s.lmic?'on':''}" role="switch" aria-checked="${!!s.lmic}" data-act="listen-mic"><span class="grow"><b>Add my microphone</b><small>${k==='call'?'Needed so your side of the call is in the notes.':'Anything you say is added to the notes.'}</small></span><i></i></button>
+     ${ok?'':'<!--'}<button class="lsw ${s.lmic?'on':''}" role="switch" aria-checked="${!!s.lmic}" data-act="listen-mic"><span class="grow"><b>Add my microphone</b><small>${k==='call'?'Needed so your side of the call is in the notes.':'Anything you say is added to the notes.'}</small></span><i></i></button>${ok?'':'-->'}
      <label class="fld"><span>Title</span><input id="soloTitle" value="${esc(s.title)}" placeholder="Optional" autocomplete="off"></label>
-     <button class="cta" data-act="listen-start" ${ok?'':'disabled'}>${I('speaker')}Start listening</button>
-     <p class="fine">The browser asks what to share. Pick the tab that is playing and keep “Also share tab audio” on. Only the sound is recorded, never the picture.</p>
+     <button class="cta" data-act="listen-start">${I(ok?'speaker':'mic')}${ok?'Start listening':'Start listening with the microphone'}</button>
+     <p class="fine">${ok?'The browser asks what to share. Pick the tab that is playing and keep “Also share tab audio” on. Only the sound is recorded, never the picture.':'The phone asks to use the microphone. If you leave this page, the phone may stop the recording; the notes are then written from what was captured.'}</p>
      <button class="btn2" data-act="listen-file">Use a saved audio or video file</button>
      ${drawer('lis-how','How Listen works','',`<ol class="steps"><li>Press Start and pick the tab that is playing: a video, or a Meet, Teams or Zoom call in the browser.</li><li>Go and watch or talk. This page keeps listening in the background. Float the small controls over other windows if you like.</li><li>Press Stop, or “Stop sharing” in the browser bar.</li><li>The recording is sent once and the notes are written: learning notes for a video, minutes for a call.</li></ol>`)}
      ${drawer('lis-tips','For clean notes','',`<ul class="ticks"><li>${I('check','s')}<span>Use headphones if your microphone is on, so it does not hear the loudspeaker.</span></li><li>${I('check','s')}<span>For a program outside the browser on Windows, share Entire screen with “Also share system audio”.</span></li><li>${I('check','s')}<span>A file you already have is quicker to upload than to play through.</span></li></ul>`)}`);}
   if(s.phase==='meet')return capsheet(
     `<div class="bar"><span class="recp ${s.paused?'paused':''}" id="sRec"><i></i><b>${s.paused?'PAUSED':'REC'}</b></span><span class="tm" id="sTime">${mmss(s.t)}</span><span class="grow"></span><span class="chipd">${s.lkind==='call'?'Call':'Video'}</span></div>
      <h1 class="mt">${esc(s.title||'Listening')}</h1>
+     ${LIS.disp?'':`<div class="lsrc"><span>${I('mic','s')}Listening through the microphone</span></div><!--`}
      <div class="lmeters"><div class="lm">${I('speaker','s')}<span>Computer sound</span><div class="lbar"><i id="lSys"></i></div></div>
-       ${LIS.mic?`<div class="lm">${I('mic','s')}<span>Your microphone</span><div class="lbar mic"><i id="lMic"></i></div></div>`:`<div class="lm off">${I('mic','s')}<span>Microphone off</span></div>`}</div>
+       ${LIS.mic?`<div class="lm">${I('mic','s')}<span>Your microphone</span><div class="lbar mic"><i id="lMic"></i></div></div>`:`<div class="lm off">${I('mic','s')}<span>Microphone off</span></div>`}</div>${LIS.disp?'':'-->'}
      <p class="now" id="lQuiet" hidden>No sound from the computer. Is it playing?</p>`,
-    `<div class="pcard" style="padding:16px 18px"><b style="font-size:17px">Listening</b><p style="color:var(--fg2);margin-top:4px;font-size:15px">Go to your ${s.lkind==='call'?'call':'video'}. This page keeps listening in the background. Come back and stop when you are done.</p></div>
+    `<div class="pcard" style="padding:16px 18px"><b style="font-size:17px">Listening</b><p style="color:var(--fg2);margin-top:4px;font-size:15px">${LIS.disp?`Go to your ${s.lkind==='call'?'call':'video'}. This page keeps listening in the background. Come back and stop when you are done.`:`Play the ${s.lkind==='call'?'call':'video'} on a loudspeaker near this phone and keep this page on screen. Stop when you are done.`}</p></div>
      <p class="fine" id="sSaved">${savedTxt()}</p>
      ${'documentPictureInPicture' in window?`<button class="btn2" data-act="listen-pip">Float the controls over other windows</button>`:''}
      <div class="dock"><button class="dbt" data-act="solo-pause" id="sPause">${s.paused?I('play','s')+'Resume':I('pause','s')+'Pause'}</button><button class="dbt red" data-act="solo-end">${I('stop','s')}Stop and write notes</button></div>`);
@@ -956,7 +957,7 @@ const ACT={
    else ACT['listen-go']();},
  async 'listen-go'(){
    closeSheet();const s=ST.solo;if(s.phase!=='idle')return;s.mode='listen';
-   try{const stream=await listenCapture(s.lmic);await recStart(null,{stream});}
+   try{if(canListen()){const stream=await listenCapture(s.lmic);await recStart(null,{stream});}else await recStart();}
    catch(e){listenCleanup();
      if(e.name==='NotAllowedError'&&!e.noSound)return toast('Nothing was shared, so Listen did not start');
      sheet(e.noSound?`<h3>No sound was shared</h3><p>In the browser's share window, pick the <b>tab</b> that is playing and keep <b>Also share tab audio</b> switched on. A single app window cannot share its sound. On Windows, <b>Entire screen</b> with <b>Also share system audio</b> works for any program.</p><div class="stk"><button class="btnk" data-act="listen-go">Try again</button><button class="btng" data-act="close">Cancel</button></div>`
