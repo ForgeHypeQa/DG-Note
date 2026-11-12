@@ -595,6 +595,7 @@ async function translateReport(r,target){
 // Writes the meeting report (minutes) from the checked transcript. Uses the names, corrections and edits.
 async function makeMinutes(r,tplId){
   if(!r||!r.real||r.minutes==='working')return;
+  if(r.stage==='review')r.stage='done';
   const tpl=tplById(tplId||r.templateId||getDefaultTplId());
   r.minutes='working';r.minutesErr='';if(curRep()===r)render();
   try{
@@ -645,10 +646,7 @@ async function loadSaved(){
     const mine=(await DB.all('reports')||[]).filter(r=>r.owner===ME_USER?.id||ME_USER?.role==='admin').sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
     for(const r of mine){r.audios=(r._blobs||[]).map(b=>URL.createObjectURL(b));}
     ST.reports=[...mine,...ST.reports.filter(x=>!x.real)];
-    // A transcript that was still waiting for names comes back to the "Who spoke" screen.
-    const rv=mine.find(r=>r.stage==='review'&&r.owner===ME_USER?.id);
-    if(rv){Object.assign(ST.solo,{phase:'review',rid:rv.id,mid:rv.mid,result:rv.result,title:rv.title.startsWith('Solo meeting · ')?'':rv.title,startedAt:rv.startedAt,
-      speakers:rv.speakers.map(x=>({...x,open:false})),parts:rv._blobs,blob:(rv._blobs||[])[0]});}
+    // Solo always opens ready for a new meeting. A transcript still waiting for its names stays in Reports.
   }catch(e){}
 }
 async function deleteReport(r){
@@ -773,7 +771,29 @@ function unsure(r){
   r.sum.forEach((s,i)=>scan('s'+i,s)); r.dec.forEach((s,i)=>scan('d'+i,s)); r.act.forEach((a,i)=>scan('a'+i,a.t)); r.tx.forEach((l,i)=>scan('t'+i,l.s));
   return ids.size;
 }
-function repStatus(r){ if(r.status==='sent') return '<span class="tagp ok">Sent</span>'; const n=unsure(r); return `<span class="tagp warn">${n?n+' to check':'Review'}</span>`; }
+// Who is speaking: a bar with the speaker's name while the recording plays, and a strip showing who spoke when.
+function spTimeline(r){
+  const seg=r.result?.segments||[];if(!seg.length)return '';
+  const tot=Math.max(r.result.durationMs||0,seg[seg.length-1].endMs||0)||1;
+  return `<div class="nowsp" id="nowSp"><span class="nsidle">Press play to see who is speaking.</span></div>
+    <div class="sptl" id="spTl" data-tot="${tot}" ${r.audios.length===1?'data-act="rep-seek" role="button" aria-label="Jump to a point in the recording"':''}>${seg.map((g,i)=>`<i style="left:${(g.startMs/tot*100).toFixed(2)}%;width:${Math.max(.5,(g.endMs-g.startMs)/tot*100).toFixed(2)}%;--c:${r.people[r.tx[i]?.p]?.c||'#888'}"></i>`).join('')}<b id="spCur"></b></div>`;
+}
+function showSpeaker(r,ms,playing){
+  const seg=r.result.segments,box=$('#nowSp');if(!box)return;
+  const i=seg.findIndex(g=>ms>=g.startMs-150&&ms<=g.endMs+350),key=i+':'+playing;
+  if(box.dataset.k!==key){box.dataset.k=key;const p=i>=0?r.people[r.tx[i]?.p]:null;
+    box.innerHTML=p?`<span class="av lg" style="--c:${p.c}">${esc(/^Speaker \d+$/.test(p.n)?p.n.slice(8):ini(p.n))}</span><span class="grow"><b>${esc(p.n)}</b><small>${esc([p.r,p.d||p.o].filter(Boolean).join(' · ')||(playing?'Speaking now':'Paused here'))}</small></span><span class="nsbars ${playing?'on':''}" style="--c:${p.c}"><i></i><i></i><i></i><i></i></span>`
+      :`<span class="nsidle">${playing?'Nobody is speaking':'Paused'}</span>`;
+    $$('.txl.now').forEach(x=>x.classList.remove('now'));const l=$$('.txl')[i];if(l)l.classList.add('now');}
+  const c=$('#spCur'),tl=$('#spTl');if(c&&tl){c.style.left=Math.min(100,ms/(+tl.dataset.tot)*100)+'%';c.classList.add('on');}
+}
+for(const ev of ['timeupdate','play','pause','seeked'])document.addEventListener(ev,e=>{
+  const a=e.target;if(!a.classList||!a.classList.contains('aud'))return;const r=curRep();if(!r||!r.result)return;
+  if(ev==='play')$$('.aud').forEach(x=>{if(x!==a)x.pause();});
+  let off=0;for(const x of $$('.aud')){if(x===a)break;off+=isFinite(x.duration)?x.duration:0;}
+  showSpeaker(r,(off+a.currentTime)*1000,!a.paused&&!a.ended);
+},true);
+function repStatus(r){ if(r.stage==='review'&&(r.minutes||'none')==='none') return '<span class="tagp warn">Check names</span>'; if(r.status==='sent') return '<span class="tagp ok">Sent</span>'; const n=unsure(r); return `<span class="tagp warn">${n?n+' to check':'Review'}</span>`; }
 function repListHTML(){
   const f=ST.rep.filter,q=ST.rep.q.trim().toLowerCase();
   const list=ST.reports.filter(r=>(f==='all'||(f==='review'?r.status==='draft':r.kind===f))&&(!q||(r.title+' '+r.people.map(p=>p.n).join(' ')+' '+r.sum.join(' ')+' '+r.dec.join(' ')).toLowerCase().includes(q)));
@@ -830,7 +850,7 @@ function repDetail(r){
       return `<div class="tt" ${E('t'+i,'tx')}>${rt(r,'t'+i,l.s)}</div>${l.o?`<div class="to" dir="auto"${isAr?' lang="ar"':''}>${esc(l.o)}</div>`:''}`;})()}</div>`;}).join('');
   let seed=7;const rnd=()=>{seed=(seed*16807)%2147483647;return seed/2147483647;};
   const bars=r.tx.map(l=>Array.from({length:Math.max(4,Math.round(l.s.length/12))},()=>`<i style="--c:${who(l.p).c};height:${20+Math.round(rnd()*80)}%"></i>`).join('')+'<i style="--c:#D5D2D0;height:8%"></i>').join('');
-  const rec=r.real?((r.audios||[]).length?(r.audios.length>1?`<p class="note" style="margin-bottom:8px">Recorded in ${r.audios.length} parts because the phone paused the recording. The transcript covers all parts.</p>`:'')+r.audios.map((u,k)=>`${r.audios.length>1?`<b style="display:block;font-size:13px;margin:8px 0 4px">Part ${k+1}</b>`:''}<audio class="aud" controls preload="metadata" src="${u}"></audio>`).join('')+`<button class="btn2" style="margin-top:10px" data-act="rep-dl">Save the audio file${r.audios.length>1?'s':''}</button><button class="btn2" style="margin-top:8px" data-act="rep-txt">Save the transcript (.txt)</button><button class="btn2 danger" style="margin-top:8px" data-act="rep-del">Delete this meeting from the phone</button><p class="fine" style="text-align:start;margin-top:8px">Saved on this phone. The ForgeHype Meet server deletes its copy after transcription.</p>`:'<p class="note">The audio stays on the phone that recorded it.</p>'):`<div style="display:flex;gap:12px;align-items:center"><button class="playb" data-act="rep-play" aria-label="Play recording">${I(ST.rep.play?'pause':'play')}</button><div class="grow"><b style="font-size:15px">${esc(r.title.replace(/[^A-Za-z0-9]+/g,'_'))}.mp3</b><div style="font-size:13px;color:var(--fg2)">${r.dur} · ${r.people.length} speakers · kept for 30 days</div></div></div><div class="wavebars" id="wave">${bars}</div><p class="fine" style="text-align:start;margin-top:8px">Colours show who is speaking. Playback is simulated in this prototype.</p>`;
+  const rec=r.real?((r.audios||[]).length?(r.audios.length>1?`<p class="note" style="margin-bottom:8px">Recorded in ${r.audios.length} parts because the phone paused the recording. The transcript covers all parts.</p>`:'')+spTimeline(r)+r.audios.map((u,k)=>`${r.audios.length>1?`<b style="display:block;font-size:13px;margin:8px 0 4px">Part ${k+1}</b>`:''}<audio class="aud" controls preload="metadata" src="${u}"></audio>`).join('')+`<button class="btn2" style="margin-top:10px" data-act="rep-dl">Save the audio file${r.audios.length>1?'s':''}</button><button class="btn2" style="margin-top:8px" data-act="rep-txt">Save the transcript (.txt)</button><button class="btn2 danger" style="margin-top:8px" data-act="rep-del">Delete this meeting from the phone</button><p class="fine" style="text-align:start;margin-top:8px">Saved on this phone. The ForgeHype Meet server deletes its copy after transcription.</p>`:'<p class="note">The audio stays on the phone that recorded it.</p>'):`<div style="display:flex;gap:12px;align-items:center"><button class="playb" data-act="rep-play" aria-label="Play recording">${I(ST.rep.play?'pause':'play')}</button><div class="grow"><b style="font-size:15px">${esc(r.title.replace(/[^A-Za-z0-9]+/g,'_'))}.mp3</b><div style="font-size:13px;color:var(--fg2)">${r.dur} · ${r.people.length} speakers · kept for 30 days</div></div></div><div class="wavebars" id="wave">${bars}</div><p class="fine" style="text-align:start;margin-top:8px">Colours show who is speaking. Playback is simulated in this prototype.</p>`;
   const hist=r.hist.slice().reverse().map(h=>`<div class="hrow2"><small>${esc(h.label)} · ${h.when}</small><s>${esc(h.from)}</s><div>${esc(h.to)}</div></div>`).join('');
   const dock=ed&&r.real?`<button class="dbt k" data-act="rep-edit">Done</button>`:ed?`<button class="dbt" data-act="rep-dictate" ${ST.rep.dictating?'disabled':''}>${I('mic','s')}${ST.rep.dictating?'Listening…':'Dictate'}</button><button class="dbt k" data-act="rep-edit">Done</button>`
     :r.status==='sent'?`<span class="sentl">${I('check','s')}${r.real?'Approved':'Sent to '+r.people.filter(p=>p.e).length+' people'}</span><button class="dbt ic" data-act="rep-copy" aria-label="Copy summary">${I('copy','s')}</button>`
@@ -970,6 +990,7 @@ const ACT={
  'solo-open'(){const s=ST.solo;const r=buildRealReport();ST.reports=[r,...ST.reports.filter(x=>x.id!==r.id)];saveReport(r);
    Object.assign(s,{phase:'idle',t:0,paused:false,introEndMs:0,speakers:[],result:null,title:'',rid:null,err:'',mid:null,parts:null,blob:null});
    openReport(r.id);ST.open['r-tx']=false;render();window.scrollTo(0,0);makeMinutes(r);},
+ 'rep-seek'(el,e){const a=$('.aud'),b=el.getBoundingClientRect();if(!a||!b.width)return;a.currentTime=Math.max(0,Math.min(1,(e.clientX-b.left)/b.width))*(+el.dataset.tot)/1000;a.play().catch(()=>{});},
  'rep-l'(el){saveAll();const l=el.dataset.l;ST.rep.lang=l;if(l!=='en')ST.rep.edit=false;ST.rep.shim=true;if(l==='ar')ST.open['r-tx']=ST.open['r-tx']||false;render();},
  'tpl-manage'(){openTemplates(null);},
  'tpl-choose'(){const r=curRep();if(r)openTemplates(r.id);},
@@ -1000,7 +1021,7 @@ const ACT={
      openTplEditor({name:m.name,sections:m.sections,style:m.style,example:pdf?'':text},true);toast('Template ready. Check it, then save.');}
    catch(e){b.disabled=false;b.textContent='Make the template';sheet(`<h3>The template could not be made</h3><p>${esc(e.message)}</p><div class="stk"><button class="btnk" data-act="tpl-example">Try again</button><button class="btng" data-act="tpl-back">Back</button></div>`);}},
  'rep-minutes'(){const r=curRep();if(!r)return;saveAll();makeMinutes(r);},
- 'solo-new'(){const s=ST.solo;Object.assign(s,{phase:'idle',t:0,paused:false,introEndMs:0,speakers:[],result:null,title:'',rid:null,err:'',mid:null});render();checkPending();},
+ 'solo-new'(){const s=ST.solo;if(s.phase==='review')toast('The transcript is in Reports. Check the names there any time.');Object.assign(s,{phase:'idle',t:0,paused:false,introEndMs:0,speakers:[],result:null,title:'',rid:null,err:'',mid:null});render();checkPending();},
  /* ---- group ---- */
  'g-join'(){const g=ST.group;if(!g.live)return;if(!g.joined){g.joined=true;toast('You’re on the invite list. Recording started on your phone.');startGroupSim();}g.phase='meeting';render();window.scrollTo(0,0);},
  'g-lobby'(){ST.group.phase='lobby';render();},

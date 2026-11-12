@@ -20,3 +20,18 @@
 .lbar i{display:block;height:100%;width:0;border-radius:4px;background:var(--acc);transition:width .15s linear}
 .lbar.mic i{background:#45D3C5}
 .tbadge{right:3px;top:3px}
+
+/* who is speaking, while the recording plays */
+.nowsp{display:flex;align-items:center;gap:12px;min-height:64px;background:var(--ink);color:#fff;border-radius:20px;padding:12px 14px}
+.nowsp b{display:block;font-size:17px;font-weight:720;line-height:1.2}.nowsp small{display:block;font-size:13px;color:#BDB9B8;margin-top:2px}
+.nsidle{font-size:14px;color:#BDB9B8;padding-left:4px}
+.nsbars{display:flex;gap:3px;align-items:center;height:26px}
+.nsbars i{width:4px;height:6px;border-radius:2px;background:var(--c)}
+.nsbars.on i{animation:nsb .7s infinite ease-in-out}.nsbars.on i:nth-child(2){animation-delay:.12s}.nsbars.on i:nth-child(3){animation-delay:.24s}.nsbars.on i:nth-child(4){animation-delay:.36s}
+@keyframes nsb{50%{height:24px}}
+.sptl{position:relative;height:22px;margin:10px 0 12px;border-radius:7px;background:color-mix(in srgb,var(--fg) 7%,transparent);overflow:hidden}
+.sptl[data-act]{cursor:pointer}
+.sptl i{position:absolute;top:0;bottom:0;background:var(--c)}
+.sptl b{position:absolute;top:0;bottom:0;width:2.5px;background:var(--fg);left:0;display:none;box-shadow:0 0 0 1.5px var(--cardbg)}
+.sptl b.on{display:block}
+.txl.now{background:color-mix(in srgb,var(--acc) 10%,transparent);border-radius:12px;box-shadow:-8px 0 0 color-mix(in srgb,var(--acc) 10%,transparent),8px 0 0 color-mix(in srgb,var(--acc) 10%,transparent)}
