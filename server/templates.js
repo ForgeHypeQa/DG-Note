@@ -57,6 +57,19 @@ export const BUILT_IN = [
     ],
     style: 'As short as possible.', example: '',
   },
+  {
+    id: 'learning', name: 'Learning notes', builtIn: true,
+    description: 'For a video, lecture or talk: summary, key lessons, terms, steps.',
+    sections: [
+      { title: 'Summary', kind: 'summary', guide: '3 to 5 bullet points: what this was about and its main message.' },
+      { title: 'Key lessons', kind: 'bullets', guide: 'The most useful things to remember, one per bullet, most important first. Each one complete enough to understand without the recording.' },
+      { title: 'Terms and definitions', kind: 'bullets', guide: 'Important terms, names or figures that were explained, as "Term: meaning". Leave empty if none.' },
+      { title: 'Steps and how-to', kind: 'bullets', guide: 'If a method or process was taught, the steps in order. Leave empty if none.' },
+      { title: 'Test yourself', kind: 'bullets', guide: '3 to 5 short questions a learner should be able to answer afterwards.' },
+    ],
+    style: 'This is a recording of a video, lecture or talk, not a meeting. Write for someone who wants to learn from it. If the listener added spoken comments of their own, include them under the lesson they relate to, marked "My note:".',
+    example: '',
+  },
 ];
 
 // Cleans a template sent by the app (custom templates live on the phone for now).

@@ -21,6 +21,7 @@ const IC={
  speaker:'<path d="M4 9v6h4l5 4V5L8 9zM16 9a4 4 0 010 6M18.5 6.5a8 8 0 010 11"/>', search:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
  hand:'<path d="M8 13V5.5a1.5 1.5 0 013 0V11m0-1V4.5a1.5 1.5 0 013 0V11m0-4.5a1.5 1.5 0 013 0V14c0 4-2.5 7-6.5 7-3 0-4.6-1.5-6-4L3.3 13.6a1.5 1.5 0 012.5-1.6L8 14.5"/>',
 };
+const KIND_NAME={solo:'Solo',group:'Group',listen:'Listen'},KIND_ICON={solo:'device',group:'people',listen:'speaker'};
 const I=(n,c='')=>`<svg class="i ${c}" viewBox="0 0 24 24" aria-hidden="true">${IC[n]}</svg>`;
 
 /* ================= data ================= */
@@ -86,7 +87,7 @@ const T=(fn,ms)=>{const id=setTimeout(fn,ms);TM.push(id);return id;};
 function fresh(){
   TM.forEach(clearTimeout);TM=[];
   ST={tab:'solo',open:{},
-   solo:{phase:'idle',title:'',t:0,paused:false,introEndMs:0,startedAt:0,speakers:[],result:null,blob:null,mid:null,rid:null,step:'',err:'',upPct:0,pending:null},
+   solo:{mode:'solo',lkind:'video',lmic:true,phase:'idle',title:'',t:0,paused:false,introEndMs:0,startedAt:0,speakers:[],result:null,blob:null,mid:null,rid:null,step:'',err:'',upPct:0,pending:null},
    group:{phase:'lobby',live:true,joined:false,sim:false,elapsed:23*60+14,paused:false,hands:[],sharing:null,stageOpen:true,chat:[],qs:[],talk:'sara',unChat:0,unQs:0,
      people:['sara','priya','noura','fatima','joseph','rami'],pi:0,rid:null,
      upcoming:[{t:'Medication Safety Review',w:'Tomorrow · 11:00',by:'Noura'},{t:'Monthly Quality & Incidents',w:'Thu 12 Nov · 14:00',by:'Rami'}]},
@@ -122,7 +123,7 @@ async function loadServer(){
     HEALTH = await fetch(API+'/api/health').then(r=>r.json());
     const r = await fetch(API+'/api/roster').then(r=>r.json()); if(r.people) ROSTER=r.people;
   }catch(e){ HEALTH={offline:true}; }
-  if(ST.tab==='solo'&&ST.solo.phase==='idle') render();
+  if((ST.tab==='solo'||ST.tab==='listen')&&ST.solo.phase==='idle') render();
 }
 const rosterBy=n=>ROSTER.find(p=>p.name.toLowerCase()===String(n).trim().toLowerCase());
 
@@ -155,11 +156,15 @@ const DB={db:null,
 const REC={stream:null,mr:null,mime:'',mid:null,i:0,part:0,bytes:0,saves:[],ctx:null,raf:0,lock:null,hiddenAt:0,stopping:false,lost:false};
 function pickMime(){for(const m of ['audio/webm;codecs=opus','audio/mp4','audio/ogg;codecs=opus','audio/webm'])if(window.MediaRecorder&&MediaRecorder.isTypeSupported(m))return m;return '';}
 const recording=()=>REC.mr&&REC.mr.state!=='inactive';
-const savedTxt=()=>`Saved on this phone · ${(REC.bytes/1048576).toFixed(1)} MB`;
-async function recStart(continueMid){
+// One recording runs at a time. It belongs to Solo (the microphone) or Listen (the computer's sound).
+const isListen=()=>ST.solo.mode==='listen';
+const onRecTab=()=>ST.tab===(isListen()?'listen':'solo');
+let FILE_MODE='solo';
+const savedTxt=()=>`Saved on this ${isListen()?'computer':'phone'} · ${(REC.bytes/1048576).toFixed(1)} MB`;
+async function recStart(continueMid,src){
   if(!window.isSecureContext) throw new Error('The microphone only works over https (or on localhost). Open DG-Note from its https address.');
   if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder) throw new Error('This browser cannot record audio. Use Chrome on Android or Safari on iPhone.');
-  const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:true,channelCount:1}});
+  const stream=src?.stream||await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:true,channelCount:1}});
   const mime=pickMime(), mr=new MediaRecorder(stream,mime?{mimeType:mime,audioBitsPerSecond:64000}:{});
   let mid,part=0,i=0,bytes=0;
   if(continueMid){
@@ -168,7 +173,7 @@ async function recStart(continueMid){
     await DB.patch(mid,{state:'recording',parts:part+1});
   }else{
     mid='m'+Date.now();
-    await DB.put('meetings',{mid,owner:ME_USER?.id,title:ST.solo.title,mime:(mr.mimeType||mime||'audio/webm'),startedAt:Date.now(),introEndMs:0,durationSec:0,state:'recording',parts:1});
+    await DB.put('meetings',{mid,owner:ME_USER?.id,title:ST.solo.title,mime:(mr.mimeType||mime||'audio/webm'),startedAt:Date.now(),introEndMs:0,durationSec:0,state:'recording',parts:1,mode:ST.solo.mode||'solo',lkind:ST.solo.lkind});
   }
   Object.assign(REC,{stream,mr,mime:(mr.mimeType||mime||'audio/webm'),mid,i,part,bytes,saves:[],stopping:false,lost:false});
   try{navigator.storage?.persist?.();}catch(e){}
@@ -180,12 +185,12 @@ async function recStart(continueMid){
   mr.onstop=()=>{ if(!REC.stopping){ REC.lost=true; DB.patch(mid,{durationSec:ST.solo.t}).catch(()=>{}); if(document.visibilityState==='visible') recLost(); } };
   stream.getAudioTracks().forEach(t=>t.addEventListener('ended',()=>{ if(!REC.stopping&&REC.mr&&REC.mr.state!=='inactive'){ try{REC.mr.stop();}catch(e){} } }));
   mr.start(5000);
-  meter(stream); wake(true);
+  if(!src)meter(stream); wake(true);
 }
 function recStop(){
   REC.stopping=true;
   return new Promise(res=>{const mr=REC.mr;if(!mr||mr.state==='inactive')return res();mr.onstop=()=>setTimeout(res,30);mr.stop();})
-   .then(()=>Promise.all(REC.saves)).then(()=>{REC.stream?.getTracks().forEach(t=>t.stop());cancelAnimationFrame(REC.raf);try{REC.ctx?.close();}catch(e){}wake(false);});
+   .then(()=>Promise.all(REC.saves)).then(()=>{REC.stream?.getTracks().forEach(t=>t.stop());cancelAnimationFrame(REC.raf);try{REC.ctx?.close();}catch(e){}wake(false);listenCleanup();});
 }
 function meter(stream){
   try{const ctx=new (window.AudioContext||window.webkitAudioContext)(),an=ctx.createAnalyser();an.fftSize=512;ctx.createMediaStreamSource(stream).connect(an);REC.ctx=ctx;
@@ -196,6 +201,7 @@ function meter(stream){
 async function wake(on){try{if(on&&'wakeLock' in navigator)REC.lock=await navigator.wakeLock.request('screen');else if(!on&&REC.lock){await REC.lock.release();REC.lock=null;}}catch(e){}}
 function recLost(){
   const s=ST.solo;if(!(s.phase==='intro'||s.phase==='meet'))return;
+  if(isListen()){ACT['solo-end-ok']();return;}
   render();
   sheet(`<div class="bigic">${I('mic')}</div><h3>Recording stopped while DG-Note was in the background</h3><p>Everything up to ${mmss(s.t)} is saved on this phone. Continue to record the rest of the meeting into the same file.</p><div class="stk"><button class="btnk" data-act="solo-continue-now">Continue recording</button><button class="btng" data-act="solo-end-ok">End meeting and send</button></div>`);
 }
@@ -205,7 +211,7 @@ document.addEventListener('visibilitychange',()=>{
   if(REC.lost||(REC.mr&&REC.mr.state==='inactive'&&!REC.stopping&&(ST.solo.phase==='intro'||ST.solo.phase==='meet'))){REC.lost=true;recLost();return;}
   if(!recording())return;
   wake(true);
-  if(REC.hiddenAt&&Date.now()-REC.hiddenAt>3000)toast('Welcome back. Still recording. Keep DG-Note on screen: some phones stop recording in the background.');
+  if(REC.hiddenAt&&Date.now()-REC.hiddenAt>3000&&!isListen())toast('Welcome back. Still recording. Keep DG-Note on screen: some phones stop recording in the background.');
   REC.hiddenAt=0;
 });
 
@@ -238,21 +244,24 @@ async function processMeeting(mid,fileBlob){
       if(!r.ok)throw new Error(r.status===401?'Please sign in again. Your recording is safe on this phone.':j.error||('Server error '+r.status));
       if(j.status==='error')throw new Error(j.error||'Transcription failed.');
       if(j.status==='done'){s.result=j.result;break;}
-      if(j.step!==s.step){s.step=j.step;if(ST.tab==='solo'&&s.phase==='proc')render();}
+      if(j.step!==s.step){s.step=j.step;if(onRecTab()&&s.phase==='proc')render();}
     }
     s.speakers=s.result.speakers.map((x,i)=>({...x,c:C[i%C.length],open:false,edited:false}));
     if(!s.speakers.length)throw new Error('No speech was found in the recording.');
+    if(isListen())markMe();
     // Save straight away so nothing is lost if the app is closed on the next screen.
     const r=buildRealReport();r.stage='review';ST.reports.unshift(r);s.rid=r.id;await saveReport(r);
     if(mid)await DB.patch(mid,{state:'done',rid:r.id}).catch(()=>{});
     s.phase='review';
-    if(ST.tab==='solo')render();else toast('Transcript ready. Open Solo to check the names.');
-  }catch(e){s.phase='error';s.err=e.message||String(e);if(ST.tab==='solo')render();else toast('Solo: '+esc(s.err));}
+    // A video has nobody to name: go straight to the notes.
+    if(isListen()&&s.lkind==='video'&&ST.tab==='listen'){ACT['solo-open']();return;}
+    if(onRecTab())render();else toast(`Transcript ready. Open ${isListen()?'Listen':'Solo'} to check the names.`);
+  }catch(e){s.phase='error';s.err=e.message||String(e);if(onRecTab())render();else toast((isListen()?'Listen: ':'Solo: ')+esc(s.err));}
 }
 async function checkPending(){
   try{const ms=(await DB.all('meetings')||[]).filter(m=>m.state!=='done'&&m.mid!==REC.mid&&(!m.owner||m.owner===ME_USER?.id||ME_USER?.role==='admin'));
     ST.solo.pending=ms.sort((a,b)=>b.startedAt-a.startedAt)[0]||null;
-    if(ST.tab==='solo'&&ST.solo.phase==='idle')render();}catch(e){}
+    if((ST.tab==='solo'||ST.tab==='listen')&&ST.solo.phase==='idle')render();}catch(e){}
 }
 function audioName(){const s=ST.solo,ext=/mp4|m4a|aac/.test(s.blob?.type||'')?'m4a':/ogg/.test(s.blob?.type||'')?'ogg':/mpeg|mp3/.test(s.blob?.type||'')?'mp3':/wav/.test(s.blob?.type||'')?'wav':'webm';
   return `DG-Note_${(s.title||'Solo').replace(/[^A-Za-z0-9]+/g,'_').replace(/^_|_$/g,'')}_${new Date().toISOString().slice(0,10)}.${ext}`;}
@@ -299,12 +308,13 @@ function serverNote(){
   if(!HEALTH.engine)return `<div class="warnbox">Transcription is not switched on for this server yet. You can still record; ask the admin to switch it on.</div>`;
   return '';
 }
-function viewSolo(){
-  const s=ST.solo;
+function viewSolo(fromListen){
+  const s=ST.solo,L=isListen();
+  if(!fromListen&&L&&s.phase!=='idle')return capsheet(`<div class="eyebrow">One device on the table</div><h1 class="lt">Solo</h1><p class="sub">Listen is running. Finish it before you start a Solo meeting.</p>`,`<button class="cta" data-tab="listen">Open Listen</button>`);
   if(s.phase==='idle') return capsheet(
     `<div class="eyebrow">One device on the table</div><h1 class="lt">Solo</h1><p class="sub">For up to 4 people sitting within 1 metre. The app tells the voices apart.</p>${tableHTML()}`,
     `${serverNote()}
-     ${s.pending?`<div class="pend"><span class="rico">${I('mic')}</span><div class="grow"><b>${s.pending.state==='recording'?'Meeting was interrupted':'Recording not sent yet'}</b><small>${esc(s.pending.title||'Untitled')} · ${new Date(s.pending.startedAt).toLocaleString([], {weekday:'short',hour:'2-digit',minute:'2-digit'})}</small><small style="display:block">${s.pending.durationSec?mmss(s.pending.durationSec)+' saved on this phone':''}</small><div class="pendb">${s.pending.state==='recording'?'<button class="pillk" data-act="solo-continue">Continue recording</button><button class="pillg" data-act="solo-pending">Send it</button>':'<button class="pillk" data-act="solo-pending">Send it now</button>'}<button class="pillg" data-act="solo-discard">Delete</button></div></div></div>`:''}
+     ${s.pending?`<div class="pend"><span class="rico">${I('mic')}</span><div class="grow"><b>${s.pending.state==='recording'?'Meeting was interrupted':'Recording not sent yet'}</b><small>${esc(s.pending.title||'Untitled')} · ${new Date(s.pending.startedAt).toLocaleString([], {weekday:'short',hour:'2-digit',minute:'2-digit'})}</small><small style="display:block">${s.pending.durationSec?mmss(s.pending.durationSec)+' saved on this phone':''}</small><div class="pendb">${s.pending.state==='recording'?(s.pending.mode==='listen'?'':'<button class="pillk" data-act="solo-continue">Continue recording</button>')+'<button class="pillg" data-act="solo-pending">Send it</button>':'<button class="pillk" data-act="solo-pending">Send it now</button>'}<button class="pillg" data-act="solo-discard">Delete</button></div></div></div>`:''}
      <label class="fld"><span>Meeting title</span><input id="soloTitle" value="${esc(s.title)}" placeholder="Optional" autocomplete="off"></label>
      <button class="cta" data-act="solo-start">${I('mic')}Start meeting</button>
      <p class="fine">First the app announces that the meeting is recorded for digital records.</p>
@@ -314,7 +324,7 @@ function viewSolo(){
      ${rosterDrawer()}`);
   if(s.phase==='proc'){
     const pi=stepIx(s.step);
-    return capsheet(`<div class="eyebrow">Recording saved</div><h1 class="lt">Meeting ended</h1><p class="sub">${esc(s.title||'Untitled meeting')}${s.t?' · '+durTxt(s.t)+' recorded':''}</p>`,
+    return capsheet(`<div class="eyebrow">Recording saved</div><h1 class="lt">${L?'Stopped listening':'Meeting ended'}</h1><p class="sub">${esc(s.title||'Untitled meeting')}${s.t?' · '+durTxt(s.t)+' recorded':''}</p>`,
      `<div class="pcard">${STEPS.map(([k,l],i)=>`<div class="pst ${i<pi?'done':i===pi?'run':''}"><span class="pic">${i<pi?I('check','s'):i===pi?'':i+1}</span><span class="grow">${l}</span>${k==='upload'&&i===pi?`<b id="upPct">${Math.round((s.upPct||0)*100)}%</b>`:''}</div>`).join('')}</div>
       <p class="fine">Long meetings take a minute or two. The recording stays on this phone until it is done.</p>`);
   }
@@ -322,7 +332,7 @@ function viewSolo(){
     `<div class="warnbox">${esc(s.err)}</div>
      ${/sign in/i.test(s.err)?`<button class="cta" data-act="sign-in-again">Sign in again</button>`:`<button class="cta" data-act="solo-retry">Try again</button>`}
      <button class="btn2" data-act="solo-save-audio">Save the audio file</button>
-     <button class="btn2" data-act="solo-new">Back to Solo</button>`);
+     <button class="btn2" data-act="solo-new">Back to ${L?'Listen':'Solo'}</button>`);
   if(s.phase==='review') return capsheet(
     `<div class="eyebrow">Transcript ready</div><h1 class="mt">Who spoke</h1><p class="sub">Check who spoke, then create the report. Tap a card to name someone, add their email, or join two voices that are the same person.</p>${tableHTML()}`,
     `<div class="sech"><h2>Speakers</h2><span>${(n=>n+(n===1?' person':' people'))(s.speakers.filter(x=>!x.mergedInto).length)}</span></div>
@@ -330,7 +340,7 @@ function viewSolo(){
      <datalist id="rosterNames">${ROSTER.map(p=>`<option value="${esc(p.name)}">`).join('')}</datalist>
      <button class="cta" data-act="solo-open">Save names and create report</button>
      <button class="btn2" data-act="solo-save-audio">Save the audio file</button>
-     <button class="btn2" data-act="solo-new">New Solo meeting</button>`);
+     <button class="btn2" data-act="solo-new">${L?'Listen again':'New Solo meeting'}</button>`);
   // intro + meet
   return capsheet(
     `<div class="bar"><span class="recp ${s.paused?'paused':''}" id="sRec"><i></i><b>${s.paused?'PAUSED':'REC'}</b></span><span class="tm" id="sTime">${mmss(s.t)}</span><span class="grow"></span><span class="chipd">${s.phase==='intro'?'Introductions':'Meeting'}</span></div>
@@ -342,6 +352,115 @@ function viewSolo(){
      <p class="fine" id="sSaved">${savedTxt()}</p>
      ${s.phase==='intro'?rosterDrawer():''}
      <div class="dock"><button class="dbt" data-act="solo-pause" id="sPause">${s.paused?I('play','s')+'Resume':I('pause','s')+'Pause'}</button><button class="dbt red" data-act="solo-end">${I('stop','s')}End meeting</button></div>`);
+}
+/* ================= Listen: calls and videos on this computer ================= */
+// The browser hands over the sound of a tab (or the whole computer) as a digital signal, so it is
+// not re-recorded through the speaker. The microphone is mixed in as a second source.
+const LIS={disp:null,mic:null,ctx:null,node:null,pip:null,flags:[],t:0,quiet:0};
+const canListen=()=>!!(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia)&&!/Android|iPhone|iPad/i.test(navigator.userAgent);
+// Runs on the audio thread, so it keeps time even when this tab is in the background.
+// Every 0.2 s it reports the loudness of the computer sound and of the microphone.
+const METER_SRC=`class M extends AudioWorkletProcessor{constructor(){super();this.n=0;this.s=[0,0];this.w=sampleRate*0.2;}
+process(inputs){for(let k=0;k<2;k++){const ch=inputs[k]&&inputs[k][0];if(ch)for(let i=0;i<ch.length;i++)this.s[k]+=ch[i]*ch[i];}
+this.n+=128;if(this.n>=this.w){this.port.postMessage([Math.sqrt(this.s[0]/this.n),Math.sqrt(this.s[1]/this.n),this.n/sampleRate]);this.n=0;this.s=[0,0];}return true;}}
+registerProcessor('fh-meter',M);`;
+async function listenCapture(withMic){
+  if(!window.isSecureContext)throw new Error('Listen only works over https (or on localhost).');
+  if(!canListen()||!window.MediaRecorder)throw new Error('Listen needs Chrome or Edge on a computer.');
+  const disp=await navigator.mediaDevices.getDisplayMedia({video:true,audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false},systemAudio:'include',selfBrowserSurface:'exclude'});
+  if(!disp.getAudioTracks().length){disp.getTracks().forEach(t=>t.stop());throw Object.assign(new Error('No sound was shared.'),{noSound:true});}
+  disp.getVideoTracks().forEach(t=>{t.enabled=false;});   // the picture is never recorded or sent
+  let mic=null;
+  if(withMic){try{mic=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});}catch(e){toast('Microphone not available. Listening to the computer sound only.');}}
+  const ctx=new (window.AudioContext||window.webkitAudioContext)(),dest=ctx.createMediaStreamDestination();
+  try{dest.channelCount=1;dest.channelCountMode='explicit';}catch(e){}
+  const sys=ctx.createMediaStreamSource(new MediaStream(disp.getAudioTracks()));sys.connect(dest);
+  const mi=mic?ctx.createMediaStreamSource(mic):null;if(mi)mi.connect(dest);
+  Object.assign(LIS,{disp,mic,ctx,node:null,flags:[],t:0,quiet:0});
+  try{await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([METER_SRC],{type:'application/javascript'})));
+    const node=new AudioWorkletNode(ctx,'fh-meter',{numberOfInputs:2,numberOfOutputs:1}),z=ctx.createGain();z.gain.value=0;
+    sys.connect(node,0,0);if(mi)mi.connect(node,0,1);node.connect(z);z.connect(ctx.destination);
+    node.port.onmessage=e=>listenLevels(e.data[0],e.data[1],e.data[2]);LIS.node=node;}catch(e){}
+  // "Stop sharing" in the browser bar ends the session and writes the notes.
+  disp.getTracks().forEach(t=>t.addEventListener('ended',()=>{if(isListen()&&ST.solo.phase==='meet'&&!REC.stopping){toast('Sharing stopped. Writing the notes.');ACT['solo-end-ok']();}}));
+  if(ctx.state==='suspended')try{await ctx.resume();}catch(e){}
+  return dest.stream;
+}
+function listenCleanup(){
+  try{LIS.pip?.close();}catch(e){}
+  [LIS.disp,LIS.mic].forEach(m=>m?.getTracks().forEach(t=>t.stop()));
+  try{LIS.ctx?.close();}catch(e){}
+  Object.assign(LIS,{disp:null,mic:null,ctx:null,node:null,pip:null});
+}
+function listenLevels(a,b,dt){
+  const s=ST.solo;if(!isListen()||s.phase!=='meet')return;
+  if(!s.paused){
+    LIS.t+=dt;const on=b>0.012&&b>a*0.6?1:0,idx=Math.floor(LIS.t*5);while(LIS.flags.length<=idx)LIS.flags.push(on);   // when the microphone was the one talking
+    if(a>0.003)LIS.quiet=0;else LIS.quiet+=dt;
+    const t=Math.floor(LIS.t);if(t!==s.t){s.t=t;const e=$('#sTime');if(e)e.textContent=mmss(t);if(LIS.pip){const p=LIS.pip.document.getElementById('pT');if(p)p.textContent=mmss(t);}}
+  }
+  const w=v=>Math.min(100,Math.round(Math.sqrt(s.paused?0:v)*220))+'%';
+  for(const d of [document,LIS.pip&&LIS.pip.document]){if(!d)continue;const x=d.getElementById('lSys'),y=d.getElementById('lMic');if(x)x.style.width=w(a);if(y)y.style.width=w(b);}
+  const q=$('#lQuiet');if(q)q.hidden=LIS.quiet<10;
+}
+// The voice that spoke while the microphone was active is the person using this computer.
+function markMe(){
+  const s=ST.solo,f=s.micFlags;if(!f||!f.length||!s.result||(s.parts||[]).length>1)return;
+  const fr={};
+  for(const g of s.result.segments){const o=fr[g.speaker]||(fr[g.speaker]={n:0,m:0}),a=Math.floor(g.startMs/200),b=Math.max(a+1,Math.ceil(g.endMs/200));for(let i=a;i<b&&i<f.length;i++){o.n++;o.m+=f[i];}}
+  const hot=s.speakers.filter(x=>{const o=fr[x.label];return o&&o.n>=5&&o.m/o.n>=0.6;});
+  if(hot.length!==1)return;   // unclear (for example the microphone also hears the loudspeaker): leave it to the user
+  hot[0].me=true;if(!hot[0].name)hot[0].name=ME_USER?.name||'Me';
+}
+async function listenPip(auto){
+  if(!('documentPictureInPicture' in window)){if(!auto)toast('Floating controls need Chrome or Edge on a computer');return;}
+  if(LIS.pip||!isListen()||ST.solo.phase!=='meet')return;
+  let w;try{w=await documentPictureInPicture.requestWindow({width:340,height:84});}catch(e){if(!auto)toast('The floating controls could not open');return;}
+  const d=w.document,s=ST.solo,st=d.createElement('style');d.title='ForgeHype Meet';
+  st.textContent=`html,body{margin:0;height:100%;background:#161414;color:#fff;font:600 14px/1 system-ui,Segoe UI,Roboto,sans-serif}
+   .p{height:100%;display:flex;align-items:center;gap:10px;padding:0 12px;box-sizing:border-box}
+   .dot{width:10px;height:10px;border-radius:50%;background:#FF453A;flex:none;animation:b 1.2s infinite}.dot.pz{background:#FFC46A;animation:none}@keyframes b{50%{opacity:.25}}
+   b{font-variant-numeric:tabular-nums;font-size:16px;min-width:48px}
+   .bs{flex:1;display:flex;flex-direction:column;gap:5px;min-width:30px}.bs div{height:5px;border-radius:3px;background:#2C2929;overflow:hidden}.bs i{display:block;height:100%;width:0;background:#FF5D00;border-radius:3px;transition:width .15s}.bs div+div i{background:#45D3C5}
+   button{font:inherit;border:0;border-radius:999px;padding:10px 14px;background:#2C2929;color:#fff;cursor:pointer}button.r{background:#FF453A}`;
+  d.head.appendChild(st);
+  d.body.innerHTML=`<div class="p"><span class="dot ${s.paused?'pz':''}" id="pD"></span><b id="pT">${mmss(s.t)}</b><div class="bs" title="Computer sound and microphone"><div><i id="lSys"></i></div><div><i id="lMic"></i></div></div><button id="pP">${s.paused?'Resume':'Pause'}</button><button id="pE" class="r">Stop</button></div>`;
+  d.getElementById('pP').onclick=()=>ACT['solo-pause']();
+  d.getElementById('pE').onclick=()=>ACT['solo-end-ok']();
+  w.addEventListener('pagehide',()=>{LIS.pip=null;});
+  LIS.pip=w;
+}
+function viewListen(){
+  const s=ST.solo;
+  if(s.phase!=='idle'&&!isListen())return capsheet(`<div class="eyebrow">Calls and videos</div><h1 class="lt">Listen</h1><p class="sub">A Solo meeting is in progress. Finish it before you start Listen.</p>`,`<button class="cta" data-tab="solo">Open Solo</button>`);
+  if(s.phase==='idle'){const ok=canListen(),k=s.lkind||'video';
+    return capsheet(
+    `<div class="eyebrow">Calls and videos on this computer</div><h1 class="lt">Listen</h1><p class="sub">Takes the sound straight from the tab or the computer, not through the speaker, and adds your microphone. The notes are written when you stop.</p>
+     <div class="lsrc"><span>${I('speaker','s')}Computer sound</span><i>+</i><span>${I('mic','s')}Your microphone</span></div>`,
+    `${serverNote()}
+     ${s.pending?`<div class="note">A recording is waiting to be sent. Open Solo to send it.</div>`:''}
+     ${ok?'':`<div class="warnbox">Listen works in Chrome or Edge on a computer. A phone does not let a web page take the sound it is playing. On a phone, use Solo with the speaker on, or send a saved file below.</div>`}
+     <div class="lopts" role="radiogroup" aria-label="What are you listening to">
+       <button class="lopt ${k==='video'?'on':''}" role="radio" aria-checked="${k==='video'}" data-act="listen-kind" data-k="video"><b>Video or lecture</b><small>Learning notes: summary, key lessons, terms and steps</small></button>
+       <button class="lopt ${k==='call'?'on':''}" role="radio" aria-checked="${k==='call'}" data-act="listen-kind" data-k="call"><b>Call or meeting</b><small>Minutes: who said what, decisions and action items</small></button></div>
+     <button class="lsw ${s.lmic?'on':''}" role="switch" aria-checked="${!!s.lmic}" data-act="listen-mic"><span class="grow"><b>Add my microphone</b><small>${k==='call'?'Needed so your side of the call is in the notes.':'Anything you say is added to the notes.'}</small></span><i></i></button>
+     <label class="fld"><span>Title</span><input id="soloTitle" value="${esc(s.title)}" placeholder="Optional" autocomplete="off"></label>
+     <button class="cta" data-act="listen-start" ${ok?'':'disabled'}>${I('speaker')}Start listening</button>
+     <p class="fine">The browser asks what to share. Pick the tab that is playing and keep “Also share tab audio” on. Only the sound is recorded, never the picture.</p>
+     <button class="btn2" data-act="listen-file">Use a saved audio or video file</button>
+     ${drawer('lis-how','How Listen works','',`<ol class="steps"><li>Press Start and pick the tab that is playing: a video, or a Meet, Teams or Zoom call in the browser.</li><li>Go and watch or talk. This page keeps listening in the background. Float the small controls over other windows if you like.</li><li>Press Stop, or “Stop sharing” in the browser bar.</li><li>The recording is sent once and the notes are written: learning notes for a video, minutes for a call.</li></ol>`)}
+     ${drawer('lis-tips','For clean notes','',`<ul class="ticks"><li>${I('check','s')}<span>Use headphones if your microphone is on, so it does not hear the loudspeaker.</span></li><li>${I('check','s')}<span>For a program outside the browser on Windows, share Entire screen with “Also share system audio”.</span></li><li>${I('check','s')}<span>A file you already have is quicker to upload than to play through.</span></li></ul>`)}`);}
+  if(s.phase==='meet')return capsheet(
+    `<div class="bar"><span class="recp ${s.paused?'paused':''}" id="sRec"><i></i><b>${s.paused?'PAUSED':'REC'}</b></span><span class="tm" id="sTime">${mmss(s.t)}</span><span class="grow"></span><span class="chipd">${s.lkind==='call'?'Call':'Video'}</span></div>
+     <h1 class="mt">${esc(s.title||'Listening')}</h1>
+     <div class="lmeters"><div class="lm">${I('speaker','s')}<span>Computer sound</span><div class="lbar"><i id="lSys"></i></div></div>
+       ${LIS.mic?`<div class="lm">${I('mic','s')}<span>Your microphone</span><div class="lbar mic"><i id="lMic"></i></div></div>`:`<div class="lm off">${I('mic','s')}<span>Microphone off</span></div>`}</div>
+     <p class="now" id="lQuiet" hidden>No sound from the computer. Is it playing?</p>`,
+    `<div class="pcard" style="padding:16px 18px"><b style="font-size:17px">Listening</b><p style="color:var(--fg2);margin-top:4px;font-size:15px">Go to your ${s.lkind==='call'?'call':'video'}. This page keeps listening in the background. Come back and stop when you are done.</p></div>
+     <p class="fine" id="sSaved">${savedTxt()}</p>
+     ${'documentPictureInPicture' in window?`<button class="btn2" data-act="listen-pip">Float the controls over other windows</button>`:''}
+     <div class="dock"><button class="dbt" data-act="solo-pause" id="sPause">${s.paused?I('play','s')+'Resume':I('pause','s')+'Pause'}</button><button class="dbt red" data-act="solo-end">${I('stop','s')}Stop and write notes</button></div>`);
+  return viewSolo(true);
 }
 function soloNow(){
   const s=ST.solo;
@@ -501,10 +620,11 @@ function buildRealReport(){
   const old=s.rid&&ST.reports.find(x=>x.id===s.rid);
   const parts=s.parts||(s.blob?[s.blob]:[]);
   const keep=old?{res:old.res,ed:old.ed,hist:old.hist,add:old.add,status:old.status,sentAt:old.sentAt}:blank();
-  if(old&&old.minutes==='done')Object.assign(keep,{minutes:'done',sum:old.sum,topics:old.topics,dec:old.dec,act:old.act,qs:old.qs});
+  if(old&&old.minutes==='done')Object.assign(keep,{minutes:'done',sum:old.sum,topics:old.topics,dec:old.dec,act:old.act,qs:old.qs,layout:old.layout,extra:old.extra,templateName:old.templateName});
+  const L=s.mode==='listen',tplId=old?.templateId||(L&&s.lkind==='video'?'learning':undefined);
   return {id:s.rid||('R'+Date.now()),owner:ME_USER?.id,mid:s.mid||null,stage:'done',createdAt:old?.createdAt||Date.now(),
     result:res,speakers:s.speakers.map(({open,...x})=>x),startedAt:s.startedAt||null,
-    kind:'solo',real:true,title:s.title.trim()||('Solo meeting · '+hm(st)),when:st.toDateString()===new Date().toDateString()?'Today':st.toLocaleDateString([],{weekday:'short',day:'numeric',month:'short'}),
+    kind:L?'listen':'solo',lkind:L?s.lkind:undefined,templateId:tplId,real:true,title:s.title.trim()||((L?'Listen · ':'Solo meeting · ')+hm(st)),when:st.toDateString()===new Date().toDateString()?'Today':st.toLocaleDateString([],{weekday:'short',day:'numeric',month:'short'}),
     time:hm(st)+' – '+hm(en),dur:durTxt(dms/1000),by:ME_USER?.name||'This phone',status:'draft',people,sum:[],dec:[],act:[],qs:[],langs:res.languages||[],
     tx:res.segments.map(g=>({p:mapP[g.speaker]??0,t:mmss(g.startMs/1000),s:g.text,o:g.orig||undefined})),
     tr:{},_blobs:parts,audios:parts.map(b=>URL.createObjectURL(b)),audioName:audioName(),...keep};
@@ -657,7 +777,7 @@ function repStatus(r){ if(r.status==='sent') return '<span class="tagp ok">Sent<
 function repListHTML(){
   const f=ST.rep.filter,q=ST.rep.q.trim().toLowerCase();
   const list=ST.reports.filter(r=>(f==='all'||(f==='review'?r.status==='draft':r.kind===f))&&(!q||(r.title+' '+r.people.map(p=>p.n).join(' ')+' '+r.sum.join(' ')+' '+r.dec.join(' ')).toLowerCase().includes(q)));
-  return list.length?list.map(r=>`<button class="rrow" data-act="rep-open" data-id="${r.id}"><span class="rico">${I(r.kind==='solo'?'device':'people')}</span><span class="grow"><b>${esc(r.title)}</b><small>${r.when} · ${r.dur} · ${r.kind==='solo'?'Solo':'Group'} · ${r.people.length} people</small></span>${repStatus(r)}</button>`).join(''):'<div class="empty">No reports match.</div>';
+  return list.length?list.map(r=>`<button class="rrow" data-act="rep-open" data-id="${r.id}"><span class="rico">${I(KIND_ICON[r.kind]||'people')}</span><span class="grow"><b>${esc(r.title)}</b><small>${r.when} · ${r.dur} · ${KIND_NAME[r.kind]||'Group'} · ${r.people.length} people</small></span>${repStatus(r)}</button>`).join(''):'<div class="empty">No reports match.</div>';
 }
 function viewReports(){
   const r=curRep(); if(r) return repDetail(r);
@@ -666,7 +786,7 @@ function viewReports(){
     `<div class="eyebrow">Written in English · translate any time</div><h1 class="lt">Reports</h1>
      <label class="search">${I('search')}<input id="repQ" placeholder="Search title, person or decision" value="${esc(ST.rep.q)}" autocomplete="off" aria-label="Search reports"></label>
      <button class="tplbtn" data-act="tpl-manage">${I('copy','s')}<span>Report templates</span><b>${esc(tplById(getDefaultTplId()).name)}</b>${I('fwd','s')}</button>`,
-    `<div class="chips">${[['all','All'],['review','Needs review'+(drafts?' · '+drafts:'')],['solo','Solo'],['group','Group']].map(([k,l])=>`<button class="chipf ${ST.rep.filter===k?'on':''}" data-act="rep-filter" data-f="${k}">${l}</button>`).join('')}</div>
+    `<div class="chips">${[['all','All'],['review','Needs review'+(drafts?' · '+drafts:'')],['solo','Solo'],['group','Group'],['listen','Listen']].map(([k,l])=>`<button class="chipf ${ST.rep.filter===k?'on':''}" data-act="rep-filter" data-f="${k}">${l}</button>`).join('')}</div>
      <div id="repList" style="display:flex;flex-direction:column;gap:10px">${repListHTML()}</div>`);
 }
 function repDetail(r){
@@ -689,7 +809,7 @@ function repDetail(r){
       ${r.real?`<span class="lseg" role="group" aria-label="Language">${[['en','EN','English'],['ar','AR','Arabic'],['orig','Orig','As spoken']].map(([k,t,a])=>`<button class="${lang===k?'on':''}" data-act="rep-l" data-l="${k}" aria-label="${a}" title="${a}">${t}</button>`).join('')}</span>`
         :Object.keys(r.tr).length?`<button class="pillb" data-act="rep-lang">${I('globe','s')}${LANG[lang].name}</button>`:''}
       ${r.status==='draft'&&lang==='en'?`<button class="pillb ${ed?'on':''}" data-act="rep-edit">${ed?'Done':'Edit'}</button>`:''}</div>
-    <div class="kind">${I(r.kind==='solo'?'device':'people','s')}<span>${r.kind==='solo'?'Solo':'Group'} · ${r.people.length} people</span>${repStatus(r)}</div>
+    <div class="kind">${I(KIND_ICON[r.kind]||'people','s')}<span>${KIND_NAME[r.kind]||'Group'} · ${r.people.length} people</span>${repStatus(r)}</div>
     <h1 class="mt">${esc(r.title)}</h1>
     <p class="meta">${r.when} · ${r.time} · ${r.dur}<br>Called by ${esc(r.by)}</p>
     ${!lay||lay.some(e=>e.field==='summary')?`<div class="sumh">${esc(T('summary',L.sum))}</div>`:''}
@@ -755,12 +875,12 @@ function stopPlay(){if(ST.rep.play){clearInterval(ST.rep.play);ST.rep.play=null;
 /* ================= render ================= */
 function render(){
   const cr=ST.rep&&ST.rep.id&&ST.reports.find(r=>r.id===ST.rep.id);if(cr&&cr.real)saveReport(cr);
-  const app=$('#app'); app.className='app '+(ST.tab==='solo'?'t-dark':'t-mix');
+  const app=$('#app'); app.className='app '+(ST.tab==='solo'||ST.tab==='listen'?'t-dark':'t-mix');
   $$('.tabs button').forEach(b=>{const on=b.dataset.tab===ST.tab;b.classList.toggle('on',on);b.setAttribute('aria-selected',on);});
   const d=ST.reports.filter(r=>r.status==='draft').length, bd=$('#repBadge'); bd.textContent=d; bd.classList.toggle('on',d>0&&ST.tab!=='reports');
   stopPlay();
-  $('#view').innerHTML = ST.tab==='solo'?viewSolo():ST.tab==='group'?viewGroup():viewReports();
-  if(ST.tab==='solo') syncSolo();
+  $('#view').innerHTML = ST.tab==='solo'?viewSolo():ST.tab==='listen'?viewListen():ST.tab==='group'?viewGroup():viewReports();
+  if(ST.tab==='solo'||ST.tab==='listen') syncSolo();
   if(ST.tab==='group') syncGroup();
   ST.rep.shim=false;
 }
@@ -782,7 +902,7 @@ const ACT={
  /* ---- solo ---- */
  'solo-start'(){sheet(`<div class="bigic">${I('speaker')}</div><h3>The app tells everyone first</h3><div class="quote">“This meeting will be recorded for digital records.”</div><p>The phone says it aloud when recording starts, so it is on the record too. Then each person introduces themselves.</p><div class="stk"><button class="btnk" data-act="solo-go">Everyone agrees · Start recording</button><button class="btng" data-act="close">Cancel</button></div>`);},
  async 'solo-go'(){
-   closeSheet();const s=ST.solo;
+   closeSheet();const s=ST.solo;s.mode='solo';
    try{await recStart();}catch(e){sheet(`<h3>Cannot use the microphone</h3><p>${esc(e.name==='NotAllowedError'?'Microphone access was blocked. Allow the microphone for this site in the browser settings, then try again.':(e.message||String(e)))}</p><div class="stk"><button class="btnk" data-act="close">OK</button></div>`);return;}
    Object.assign(s,{phase:'intro',t:0,paused:false,introEndMs:0,announceEndMs:0,startedAt:Date.now(),speakers:[],result:null,blob:null,rid:null,mid:REC.mid,pending:null});
    render();window.scrollTo(0,0);
@@ -793,15 +913,37 @@ const ACT={
  },
  'solo-begin'(){const s=ST.solo;s.introEndMs=s.t*1000;DB.patch(REC.mid,{introEndMs:s.introEndMs}).catch(()=>{});s.phase='meet';render();toast('Introductions saved. Talk as usual.');},
  'solo-pause'(){const s=ST.solo;s.paused=!s.paused;try{s.paused?REC.mr.pause():REC.mr.resume();}catch(e){}
-   $('#sPause').innerHTML=s.paused?I('play','s')+'Resume':I('pause','s')+'Pause';const r=$('#sRec');r.classList.toggle('paused',s.paused);r.querySelector('b').textContent=s.paused?'PAUSED':'REC';syncSolo();},
- 'solo-end'(){sheet(`<h3>End this meeting?</h3><p>Recording stops. The audio is sent once, transcribed, and each voice is named from the introductions.</p><div class="stk"><button class="btnr" data-act="solo-end-ok">End meeting</button><button class="btng" data-act="close">Keep recording</button></div>`);},
+   const b=$('#sPause');if(b)b.innerHTML=s.paused?I('play','s')+'Resume':I('pause','s')+'Pause';
+   const r=$('#sRec');if(r){r.classList.toggle('paused',s.paused);r.querySelector('b').textContent=s.paused?'PAUSED':'REC';}
+   if(LIS.pip){const d=LIS.pip.document;d.getElementById('pP').textContent=s.paused?'Resume':'Pause';d.getElementById('pD').classList.toggle('pz',s.paused);}
+   syncSolo();},
+ 'solo-end'(){if(isListen())return sheet(`<h3>Stop listening?</h3><p>Recording stops. The audio is sent once and the notes are written.</p><div class="stk"><button class="btnr" data-act="solo-end-ok">Stop and write notes</button><button class="btng" data-act="close">Keep listening</button></div>`);
+   sheet(`<h3>End this meeting?</h3><p>Recording stops. The audio is sent once, transcribed, and each voice is named from the introductions.</p><div class="stk"><button class="btnr" data-act="solo-end-ok">End meeting</button><button class="btng" data-act="close">Keep recording</button></div>`);},
  async 'solo-end-ok'(){closeSheet();const s=ST.solo;if(!(s.phase==='intro'||s.phase==='meet'))return;if(s.phase==='intro')s.introEndMs=s.t*1000;s.paused=false;
+   s.micFlags=isListen()?LIS.flags.slice():null;
    const mid=REC.mid;s.phase='proc';s.step='save';render();
    await recStop();await DB.patch(mid,{state:'ended',durationSec:s.t,introEndMs:s.introEndMs}).catch(()=>{});
    processMeeting(mid);},
  'sign-in-again'(){showLogin('Sign in, then send the recording from the Solo tab.');},
  'solo-retry'(){const s=ST.solo;processMeeting(s.mid,s.mid?null:s.blob);},
- 'solo-file'(){$('#fileIn').click();},
+ 'solo-file'(){FILE_MODE='solo';$('#fileIn').click();},
+ 'listen-file'(){FILE_MODE='listen';$('#fileIn').click();},
+ 'listen-kind'(el){ST.solo.lkind=el.dataset.k;render();},
+ 'listen-mic'(){ST.solo.lmic=!ST.solo.lmic;render();},
+ 'listen-pip'(){listenPip();},
+ 'listen-start'(){const s=ST.solo;if(s.phase!=='idle')return;
+   if(s.lkind==='call')sheet(`<div class="bigic">${I('speaker')}</div><h3>Tell everyone on the call first</h3><p>Say that the call is being recorded for notes before you start. Recording people without telling them can be against the law.</p><div class="stk"><button class="btnk" data-act="listen-go">Everyone knows · Start listening</button><button class="btng" data-act="close">Cancel</button></div>`);
+   else ACT['listen-go']();},
+ async 'listen-go'(){
+   closeSheet();const s=ST.solo;if(s.phase!=='idle')return;s.mode='listen';
+   try{const stream=await listenCapture(s.lmic);await recStart(null,{stream});}
+   catch(e){listenCleanup();
+     if(e.name==='NotAllowedError'&&!e.noSound)return toast('Nothing was shared, so Listen did not start');
+     sheet(e.noSound?`<h3>No sound was shared</h3><p>In the browser's share window, pick the <b>tab</b> that is playing and keep <b>Also share tab audio</b> switched on. A single app window cannot share its sound. On Windows, <b>Entire screen</b> with <b>Also share system audio</b> works for any program.</p><div class="stk"><button class="btnk" data-act="listen-go">Try again</button><button class="btng" data-act="close">Cancel</button></div>`
+       :`<h3>Listen could not start</h3><p>${esc(e.message||String(e))}</p><div class="stk"><button class="btnk" data-act="close">OK</button></div>`);return;}
+   Object.assign(s,{phase:'meet',t:0,paused:false,introEndMs:0,announceEndMs:0,startedAt:Date.now(),speakers:[],result:null,blob:null,rid:null,mid:REC.mid,pending:null,micFlags:null});
+   render();window.scrollTo(0,0);listenPip(true);
+ },
  'solo-save-audio'(){saveAudio(ST.solo.blob,audioName());},
  async 'solo-continue'(){const s=ST.solo,m=s.pending;if(!m)return;
    try{await recStart(m.mid);}catch(e){sheet(`<h3>Cannot use the microphone</h3><p>${esc(e.message||String(e))}</p><div class="stk"><button class="btnk" data-act="close">OK</button></div>`);return;}
@@ -812,7 +954,7 @@ const ACT={
      await Promise.all(REC.saves);await recStart(REC.mid);}
    catch(e){sheet(`<h3>Cannot use the microphone</h3><p>${esc(e.message||String(e))}</p><div class="stk"><button class="btnk" data-act="solo-end-ok">End meeting and send</button></div>`);return;}
    s.paused=false;render();toast('Recording again. The new part joins the same meeting.');},
- 'solo-pending'(){const s=ST.solo,m=s.pending;if(!m)return;Object.assign(s,{title:m.title||'',introEndMs:m.introEndMs||0,announceEndMs:m.announceEndMs||0,t:m.durationSec||0,startedAt:m.startedAt,pending:null});processMeeting(m.mid);},
+ 'solo-pending'(){const s=ST.solo,m=s.pending;if(!m)return;Object.assign(s,{mode:m.mode||'solo',lkind:m.lkind||'video',micFlags:null,title:m.title||'',introEndMs:m.introEndMs||0,announceEndMs:m.announceEndMs||0,t:m.durationSec||0,startedAt:m.startedAt,pending:null});processMeeting(m.mid);},
  async 'solo-discard'(){const s=ST.solo;if(!s.pending)return;await DB.remove(s.pending.mid).catch(()=>{});s.pending=null;render();toast('Recording deleted from this phone');},
  'sp-toggle'(el){const i=+el.dataset.i,x=ST.solo.speakers[i];x.open=!x.open;$('#fc'+i).classList.toggle('open',x.open);el.setAttribute('aria-expanded',x.open);},
  'sp-merge'(el){const s=ST.solo,x=s.speakers[+el.dataset.i],t=s.speakers.find(y=>y.label===el.dataset.into);if(!x||!t)return;
@@ -1051,7 +1193,7 @@ document.addEventListener('change',async e=>{
   }
   if(e.target.id!=='fileIn'||!e.target.files[0])return;
   const f=e.target.files[0],s=ST.solo;e.target.value='';
-  Object.assign(s,{title:s.title||f.name.replace(/\.[^.]+$/,''),t:0,introEndMs:0,announceEndMs:0,startedAt:0,pending:null});
+  Object.assign(s,{mode:FILE_MODE,micFlags:null,title:s.title||f.name.replace(/\.[^.]+$/,''),t:0,introEndMs:0,announceEndMs:0,startedAt:0,pending:null});
   processMeeting(null,f);
 });
 document.addEventListener('focusin',e=>{const el=e.target.closest&&e.target.closest('[data-ek]');if(el)ST.rep.focus=el.dataset.list;});
@@ -1063,7 +1205,7 @@ document.addEventListener('keydown',e=>{
 });
 /* clocks and "who is speaking" in Group */
 setInterval(()=>{
-  const s=ST.solo; if((s.phase==='intro'||s.phase==='meet')&&!s.paused&&recording()){s.t++;const e=$('#sTime');if(e&&ST.tab==='solo')e.textContent=mmss(s.t);}
+  const s=ST.solo; if((s.phase==='intro'||s.phase==='meet')&&!s.paused&&recording()&&!(isListen()&&LIS.node)){s.t++;const e=$('#sTime');if(e)e.textContent=mmss(s.t);}
   const g=ST.group; if(g.live&&!g.paused){g.elapsed++;const a=$('#gTime'),b=$('#gLobbyTime');if(a)a.textContent=mmss(g.elapsed);if(b)b.textContent=mmss(g.elapsed);}
 },1000);
 setInterval(()=>{
