@@ -63,8 +63,9 @@ app.post('/v1/messages', express.json({ limit: '20mb' }), (req, res) => {
   const send = t => res.json({ content: [{ type: 'text', text: t }] });
   console.log('[mock] claude model', req.body.model);
   if (/You translate/.test(sys)) {
+    const tl = (sys.match(/into ([^.\n]+)\./) || [])[1] || '';   // the language the app asked for
     const items = JSON.parse(user).items;
-    return setTimeout(() => send(JSON.stringify({ items: items.map(t => t ? 'بالعربية: ' + t : '') })), Number(process.env.MOCK_DELAY || 0));   // MOCK_DELAY=ms to test slow translation
+    return setTimeout(() => send(JSON.stringify({ items: items.map(t => t ? (/^Arabic/.test(tl) ? 'بالعربية: ' : '[' + tl + '] ') + t : '') })), Number(process.env.MOCK_DELAY || 0));   // MOCK_DELAY=ms to test slow translation
   }
   if (/You design meeting-report templates/.test(sys)) {
     console.log('[mock] template from', Array.isArray(user) ? 'pdf' : 'text');

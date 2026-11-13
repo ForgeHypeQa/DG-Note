@@ -677,7 +677,7 @@ function openTplExample(){
 }
 const fileToBase64=f=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=()=>rej(r.error);r.readAsDataURL(f);});
 
-// Arabic version of a report, in two steps so it shows quickly:
+// Second-language version of a report (the language picked in the selector), in two steps so it shows quickly:
 //   1. the report itself (summary, discussion, decisions, actions, questions): a few seconds
 //   2. the transcript, which can be long: shown as soon as it arrives
 // Lines first said in Arabic are not translated back: the original is used. Kept with the report.
@@ -705,7 +705,7 @@ async function translateReport(r,target){
     out.txDone=true;r.tr[target]=out;saveReport(r);
   }catch(e){
     if(!r.tr[target]||r.tr[target].v!==v){ST.rep.lang='orig';}
-    sheet(`<h3>The Arabic version could not be made</h3><p>${esc(e.message)}</p><div class="stk"><button class="btnk" data-act="close">OK</button></div>`);
+    sheet(`<h3>The ${langOf(target)[2]} version could not be made</h3><p>${esc(e.message)}</p><div class="stk"><button class="btnk" data-act="close">OK</button></div>`);
   }
   ST.rep.translating=false;if(curRep()===r)render();
 }
@@ -1031,7 +1031,7 @@ const ACT={
  'set-auto'(el){const on=!autoReport();try{localStorage.setItem(autoKey(),on?'1':'0');}catch(e){}el.classList.toggle('on',on);el.setAttribute('aria-checked',on);toast(on?'Reports will be written automatically':'Reports wait until you press Create the meeting report');if(!$('#bsheet.on'))return;render();},
  async 'claude-check'(){const o=$('#ccOut');if(!o)return;o.innerHTML='<p style="font-size:14px">Checking…</p>';
    try{const r=await fetch(API+'/api/admin/claude-check');const j=await r.json();
-     o.innerHTML=!j.keySet?'<div class="warnbox">No ANTHROPIC_API_KEY on the server.</div>':j.checks.map(c=>`<div class="${c.ok?'note':'warnbox'}" style="margin-top:6px">${c.kind==='report'?'Report writer':'Arabic translation'} · ${esc(c.model)}: ${c.ok?'working':'not working'}${c.ok?'':'<br><small>'+esc(c.error||'')+'</small>'}</div>`).join('');}
+     o.innerHTML=!j.keySet?'<div class="warnbox">No ANTHROPIC_API_KEY on the server.</div>':j.checks.map(c=>`<div class="${c.ok?'note':'warnbox'}" style="margin-top:6px">${c.kind==='report'?'Report writer':'Translation'} · ${esc(c.model)}: ${c.ok?'working':'not working'}${c.ok?'':'<br><small>'+esc(c.error||'')+'</small>'}</div>`).join('');}
    catch(e){o.innerHTML='<div class="warnbox">'+esc(e.message)+'</div>';}},
  install(){install();},
  'sign-out'(){signOut();},

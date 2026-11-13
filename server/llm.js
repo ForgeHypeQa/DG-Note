@@ -1,7 +1,7 @@
 // Text AI for meeting reports and translation: Claude (Anthropic) only.
 //   ANTHROPIC_API_KEY  required
 //   REPORT_MODEL       writes the report      (default claude-sonnet-5-5)
-//   TRANSLATE_MODEL    Arabic translation      (default claude-haiku-5-5)
+//   TRANSLATE_MODEL    translation             (default claude-haiku-5-5)
 // Users only ever see "ForgeHype Meet".
 const KEY = () => process.env.ANTHROPIC_API_KEY;
 export const configured = () => !!KEY();
