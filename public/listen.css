@@ -117,3 +117,8 @@ body:has(.lis-mini){background:#000}
 .helpsc{max-height:52vh;overflow-y:auto;margin-top:12px;padding-right:4px}.helpsc p{font-size:14.5px}
 
 .lvtext .pend{color:#A9A5A4}
+
+/* second language picker */
+.lseg .car{font-style:normal;font-size:9px;margin-left:3px;opacity:.7}
+.helpsc .lrowb{font-size:16px;padding:13px 4px}
+.ltog span{font-size:11px}

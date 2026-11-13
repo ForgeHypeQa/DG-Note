@@ -93,7 +93,9 @@ export async function templateFromExample({ text, pdfBase64 }) {
 }
 
 /* ---------- translation ---------- */
-const LANGS = { ar: 'Arabic (Modern Standard Arabic, professional tone)', en: 'English' };
+export const LANGS = { ar: 'Arabic (Modern Standard Arabic, professional tone)', en: 'English', bn: 'Bangla (Bengali)', fil: 'Filipino (Tagalog)', id: 'Indonesian (Bahasa Indonesia)', ms: 'Malay (Bahasa Melayu)',
+  hi: 'Hindi', ur: 'Urdu', ta: 'Tamil', ml: 'Malayalam', ne: 'Nepali', si: 'Sinhala', it: 'Italian', fr: 'French', es: 'Spanish', de: 'German', nl: 'Dutch',
+  zh: 'Chinese (Simplified)', ja: 'Japanese', ko: 'Korean', th: 'Thai' };
 const T_SYSTEM = target => `You translate meeting minutes and meeting transcripts into ${LANGS[target] || target}.
 Rules: translate every item faithfully; do not add, drop, merge or explain anything; keep people's names, numbers, dates, medicine names and doses exactly; keep it natural and professional.
 You receive JSON {"items":[...]} and must return ONLY JSON {"items":[...]} with exactly the same number of items, in the same order.`;

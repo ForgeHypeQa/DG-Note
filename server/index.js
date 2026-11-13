@@ -163,7 +163,7 @@ app.post('/api/templates/from-example', auth.requireUser, express.json({ limit: 
 app.post('/api/translate', auth.requireUser, express.json({ limit: '3mb' }), async (req, res) => {
   if (!minutes.configured()) return res.status(503).json({ error: 'Translation is not switched on for this server yet. Ask the admin.' });
   const { target, items } = req.body || {};
-  if (!['ar', 'en'].includes(target) || !Array.isArray(items)) return res.status(400).json({ error: 'Nothing to translate.' });
+  if (!Object.hasOwn(minutes.LANGS, target) || !Array.isArray(items)) return res.status(400).json({ error: 'Nothing to translate.' });
   try { res.json({ items: await minutes.translate(items.slice(0, 3000), target) }); }
   catch (e) { console.error('[translate]', e.message); res.status(502).json({ error: textError(e, 'The translation could not be made. Try again.', req.user) }); }
 });

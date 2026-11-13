@@ -46,6 +46,18 @@ const LBL={
  hi:{sum:'30 सेकंड में',dec:'निर्णय',act:'कार्य',qs:'प्रश्न',ppl:'उपस्थित लोग',tx:'ट्रांसक्रिप्ट',rec:'रिकॉर्डिंग'},
  bn:{sum:'৩০ সেকেন্ডে',dec:'সিদ্ধান্ত',act:'করণীয়',qs:'প্রশ্ন',ppl:'উপস্থিতি',tx:'ট্রান্সক্রিপ্ট',rec:'রেকর্ডিং'},
 };
+// Languages a report or live text can be shown in, besides English. [code, short label, name, own name]
+const LANG2=[['ar','AR','Arabic','العربية'],['bn','BN','Bangla','বাংলা'],['hi','HI','Hindi','हिन्दी'],['ur','UR','Urdu','اردو'],['ml','ML','Malayalam','മലയാളം'],['ta','TA','Tamil','தமிழ்'],['ne','NE','Nepali','नेपाली'],['si','SI','Sinhala (Sri Lanka)','සිංහල'],
+  ['fil','FIL','Filipino','Filipino'],['id','ID','Bahasa Indonesia','Bahasa Indonesia'],['ms','MS','Malay','Bahasa Melayu'],['fr','FR','French','Français'],['es','ES','Spanish','Español'],['it','IT','Italian','Italiano'],['de','DE','German','Deutsch'],['nl','NL','Dutch','Nederlands'],
+  ['zh','ZH','Chinese','中文'],['ja','JA','Japanese','日本語'],['ko','KO','Korean','한국어'],['th','TH','Thai','ไทย']];
+const langOf=c=>c==='en'?['en','EN','English','English']:(LANG2.find(x=>x[0]===c)||LANG2[0]);
+const isRtl=c=>c==='ar'||c==='ur';
+const lang2Key=()=>'dg-lang2-'+(ME_USER?.id||'x');
+const lang2=()=>{try{const c=localStorage.getItem(lang2Key());return LANG2.some(x=>x[0]===c)?c:'ar';}catch(e){return 'ar';}};
+function openLangs(forWhat,cur){
+  const rows=(forWhat==='lis'?[['en','EN','English','English'],...LANG2]:LANG2).map(([c,sh,n,own])=>`<button class="lrowb" data-act="lang-pick" data-c="${c}" data-for="${forWhat}"><span class="grow">${n} <small>${own===n?'':own}</small></span>${c===cur?I('check','s'):`<small>${sh}</small>`}</button>`).join('');
+  sheet(`<h3>${forWhat==='lis'?'Show the text in':'Second language'}</h3><p>${forWhat==='lis'?'The live text is shown in this language when the toggle is on.':'The report and transcript are translated into this language. English and the original stay available.'}</p><div class="helpsc">${rows}</div><div class="stk"><button class="btng" data-act="close">Cancel</button></div>`);
+}
 /* Unclear words are written {{id|heard|alternative}} */
 const TR={
  A:{ar:{sum:['حادثة كادت تقع: أُخذت عبوة ميتفورمين بدلاً من عبوة مشابهة على الرف نفسه. لم يتضرر المقيم.','سجلات ثلاجة الإنسولين مكتملة لهذا الشهر.'],dec:['تخزين العبوات المتشابهة على رفوف منفصلة مع ملصقات حمراء.','الاستمرار في تحقق ممرضة ثانية من كل جرعة إنسولين.'],act:[{t:'إعادة وضع الملصقات على العبوات المتشابهة',due:'اليوم'},{t:'إبلاغ فريق المناوبة الليلية',due:'غداً'}],qs:[]},
@@ -512,14 +524,14 @@ function liveFinish(){
 function liveEnd(){LIVE.on=false;clearTimeout(LIVE.rt);clearInterval(LIVE.ka);const ws=LIVE.ws;LIVE.ws=null;try{if(LIVE.mr&&LIVE.mr.state!=='inactive')LIVE.mr.stop();}catch(e){}LIVE.mr=null;try{ws&&ws.close();}catch(e){}
   LIVE.pend=[];cancelAnimationFrame(LIVE.raf);try{LIVE.ctx&&LIVE.ctx.close();}catch(e){}LIVE.ctx=null;LIVE.level=0;}
 function liveSoon(){if(LIVE.tmr)return;LIVE.tmr=setTimeout(()=>{LIVE.tmr=0;liveRender();},250);}
-const liveView=()=>{const s=ST.solo;return !s.ltr?'orig':s.ltarget==='ar'?'ar':'en';};
+const liveView=()=>{const s=ST.solo;return !s.ltr?'orig':(s.ltarget||'en');};
 // Text is shown as paragraphs of four sentences.
 const SENT=/[^.?!؟।。]+(?:[.?!؟।。]+["”’)]*\s*|$)/g;
 function parasOf(text){const ss=(String(text||'').match(SENT)||[]).filter(x=>x.trim()),out=[];for(let i=0;i<ss.length;i+=4)out.push(ss.slice(i,i+4).join('').trim());return out;}
 function liveParas(){
   const v=liveView();let ps=parasOf(v==='orig'?LIVE.orig:LIVE.en);
-  if(v==='ar')ps=ps.map((p,i)=>{if(i===ps.length-1&&LIVE.on)return p;const c=LIVE.ar.get(p);
-    if(c==null){LIVE.ar.set(p,'');api('/api/translate',{target:'ar',items:[p]}).then(j=>{LIVE.ar.set(p,(j.items||[])[0]||p);liveSoon();}).catch(()=>LIVE.ar.delete(p));return p;}
+  if(v!=='orig'&&v!=='en')ps=ps.map((p,i)=>{if(i===ps.length-1&&LIVE.on)return p;const k=v+'|'+p,c=LIVE.ar.get(k);
+    if(c==null){LIVE.ar.set(k,'');api('/api/translate',{target:v,items:[p]}).then(j=>{LIVE.ar.set(k,(j.items||[])[0]||p);liveSoon();}).catch(()=>LIVE.ar.delete(k));return p;}
     return c||p;});
   return ps;
 }
@@ -543,8 +555,8 @@ function viewListen(){
   const chip=(act,html,cls,attr)=>`<button class="lchip ${cls||''}" data-act="${act}" ${attr||''}>${html}</button>`;
   return `<div class="lv ${rec?'rec':''} ${s.mini?'mini':''}">
     <section class="lvcard">
-      <header class="lvh"><div class="lvt"><b>${rec?(s.paused?'Paused':'Live transcript'):'Listen'}</b><small>${k==='call'?'Call or meeting':'Video or lecture'}${s.ltr?' · in '+(tg==='ar'?'Arabic':'English'):''}</small></div>
-        <button class="ltog ${s.ltr?'on':''}" role="switch" aria-checked="${!!s.ltr}" data-act="lv-tr" aria-label="Translate to ${tg==='ar'?'Arabic':'English'}"><span>${tg==='ar'?'AR':'EN'}</span><i></i></button>
+      <header class="lvh"><div class="lvt"><b>${rec?(s.paused?'Paused':'Live transcript'):'Listen'}</b><small>${k==='call'?'Call or meeting':'Video or lecture'}${s.ltr?' · in '+langOf(tg)[2]:''}</small></div>
+        <button class="ltog ${s.ltr?'on':''}" role="switch" aria-checked="${!!s.ltr}" data-act="lv-tr" aria-label="Translate to ${langOf(tg)[2]}"><span>${langOf(tg)[1]}</span><i></i></button>
         <button class="lvib" data-act="lv-copy" aria-label="Copy the text">${I('copy','s')}</button>
         <button class="lvib" data-act="lv-mini" aria-label="${s.mini?'Full size':'Make it small'}">${li(s.mini?LIc.max:LIc.min)}</button></header>
       <div class="lvtext" id="lvText">${liveBody()}</div>
@@ -553,7 +565,7 @@ function viewListen(){
       <span class="lchip stat">${li(LIc.clock)}<b class="tm" id="sTime">${mmss(rec?s.t:0)}</b></span>
       <span class="lchip stat"><b id="sSaved">${rec?savedTxt():'0.0 MB'}</b></span>
       ${rec?chip('solo-pause',s.paused?I('play','s')+'Resume':I('pause','s')+'Pause','','id="sPause"'):''}
-      ${chip('lv-lang',li(LIc.globe)+(tg==='ar'?'To Arabic':'To English'))}
+      ${chip('lv-lang',li(LIc.globe)+'To '+langOf(tg)[2]+' ▾')}
       ${chip('lv-txt',li(LIc.dl)+'TXT')}${chip('lv-doc',li(LIc.dl)+'Word')}
       ${rec||ok?'':chip('lv-link',li(LIc.link)+(ytId(s.lurl)?'Change video':'YouTube link'))}
       ${rec?'':chip('listen-file',li(LIc.file)+'Audio file')}
@@ -688,7 +700,7 @@ async function translateReport(r,target){
     r.tr[target]=out;if(curRep()===r&&ST.rep.lang===target)render();
     // step 2: the transcript
     items=[];put=[];
-    r.tx.forEach((l,i)=>{const isAr=l.o&&/[؀-ۿ]/.test(l.o);if(isAr&&r.ed['t'+i]==null){out.tx[i]=l.o;return;}add(r.ed['t'+i]??plain(r,l.s),t=>out.tx[i]=t);});
+    r.tx.forEach((l,i)=>{const isAr=target==='ar'&&l.o&&/[؀-ۿ]/.test(l.o);if(isAr&&r.ed['t'+i]==null){out.tx[i]=l.o;return;}add(r.ed['t'+i]??plain(r,l.s),t=>out.tx[i]=t);});
     if(items.length){const j=await api('/api/translate',{target,items});j.items.forEach((t,k)=>put[k](t));}
     out.txDone=true;r.tr[target]=out;saveReport(r);
   }catch(e){
@@ -915,10 +927,10 @@ function viewReports(){
      <div id="repList" style="display:flex;flex-direction:column;gap:10px">${repListHTML()}</div>`);
 }
 function repDetail(r){
-  const lang=ST.rep.lang, L=LBL[lang]||LBL.en, rtl=lang==='ar', ed=ST.rep.edit&&lang==='en'&&r.status==='draft';
+  const lang=ST.rep.lang, L=LBL[lang]||LBL.en, rtl=isRtl(lang), isL2=lang!=='en'&&lang!=='orig', l2=langOf(isL2?lang:lang2()), ed=ST.rep.edit&&lang==='en'&&r.status==='draft';
   // Real reports: Arabic comes from a translation made on demand and kept with the report (redone after edits).
   const tr=lang==='en'||lang==='orig'?null:r.real?(r.tr[lang]&&r.tr[lang].v===(r.v||0)&&(r.tr[lang].txDone||ST.rep.translating)?r.tr[lang]:null):r.tr[lang];
-  if(r.real&&lang==='ar'&&!tr&&!ST.rep.translating)setTimeout(()=>translateReport(r,'ar'),0);
+  if(r.real&&isL2&&!tr&&!ST.rep.translating)setTimeout(()=>translateReport(r,lang),0);
   const E=(key,list)=>ed?`data-ek="${key}" data-list="${list}" contenteditable="true"`:'';
   const txt=(key,src,trTxt)=> (tr&&r.ed[key]==null&&trTxt!=null)?esc(trTxt):rt(r,key,src);
   const added=list=>r.add[list].map(a=>`<li>${a.done?`<span>${esc(a.fixed)}<span class="tagfix">Dictated</span></span>`:'<span class="rawd" id="dictLive"></span>'}</li>`).join('');
@@ -927,11 +939,11 @@ function repDetail(r){
   // Section headings from the report's template (translated in Arabic), else the standard ones.
   const lay=r.real&&mins==='done'&&Array.isArray(r.layout)?r.layout:null;
   const T=(field,fallback)=>{const e=lay&&lay.find(x=>x.field===field);return e?((tr&&tr.titles&&tr.titles[e.key])||e.title):fallback;};
-  if(r.real&&lang==='ar'&&!tr)return capsheet(`<div class="bar"><button class="back" data-act="rep-back">${I('back')}Reports</button><span class="grow"></span><span class="lseg" role="group" aria-label="Language">${[['en','EN','English'],['ar','AR','Arabic'],['orig','Orig','As spoken']].map(([k,t,a])=>`<button class="${lang===k?'on':''}" data-act="rep-l" data-l="${k}" aria-label="${a}">${t}</button>`).join('')}</span></div>
-      <h1 class="mt">${esc(r.title)}</h1><div class="writing"><span class="gdots"><i></i><i></i><i></i></span>Translating the report into Arabic…</div>`,
+  if(r.real&&isL2&&!tr)return capsheet(`<div class="bar"><button class="back" data-act="rep-back">${I('back')}Reports</button><span class="grow"></span><span class="lseg" role="group" aria-label="Language">${`<button class="${lang==='en'?'on':''}" data-act="rep-l" data-l="en" aria-label="English">EN</button><button class="${isL2?'on':''}" data-act="rep-l2" aria-label="Second language: ${l2[2]}. Tap to choose">${l2[1]}<i class="car">▾</i></button><button class="${lang==='orig'?'on':''}" data-act="rep-l" data-l="orig" aria-label="As spoken">Orig</button>`}</span></div>
+      <h1 class="mt">${esc(r.title)}</h1><div class="writing"><span class="gdots"><i></i><i></i><i></i></span>Translating the report into ${l2[2]}…</div>`,
     `<p class="fine">The report comes first, in a few seconds. The transcript follows. Tap EN to go back.</p>`);
   const cap=`<div class="bar"><button class="back" data-act="rep-back">${I('back')}Reports</button><span class="grow"></span>
-      ${r.real?`<span class="lseg" role="group" aria-label="Language">${[['en','EN','English'],['ar','AR','Arabic'],['orig','Orig','As spoken']].map(([k,t,a])=>`<button class="${lang===k?'on':''}" data-act="rep-l" data-l="${k}" aria-label="${a}" title="${a}">${t}</button>`).join('')}</span>`
+      ${r.real?`<span class="lseg" role="group" aria-label="Language">${`<button class="${lang==='en'?'on':''}" data-act="rep-l" data-l="en" aria-label="English">EN</button><button class="${isL2?'on':''}" data-act="rep-l2" aria-label="Second language: ${l2[2]}. Tap to choose">${l2[1]}<i class="car">▾</i></button><button class="${lang==='orig'?'on':''}" data-act="rep-l" data-l="orig" aria-label="As spoken">Orig</button>`}</span>`
         :Object.keys(r.tr).length?`<button class="pillb" data-act="rep-lang">${I('globe','s')}${LANG[lang].name}</button>`:''}
       ${r.status==='draft'&&lang==='en'?`<button class="pillb ${ed?'on':''}" data-act="rep-edit">${ed?'Done':'Edit'}</button>`:''}</div>
     <div class="kind">${I(KIND_ICON[r.kind]||'people','s')}<span>${KIND_NAME[r.kind]||'Group'} · ${r.people.length} people</span>${repStatus(r)}</div>
@@ -948,10 +960,10 @@ function repDetail(r){
   const act=r.act.map((a,i)=>{const p=who(a.p),t=tr&&tr.act[i];return `<div class="act"><div class="at ${rtl?'rtl':''}" ${rtl?'dir="rtl" lang="ar"':''} ${E('a'+i,'act')}>${txt('a'+i,a.t,t&&t.t)}</div><div class="am"><span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span><span>${esc((t?t.due:a.due)||'No date')}</span></div></div>`;}).join('');
   const qs=r.qs.map((q,i)=>{const p=who(q.p),t=tr&&tr.qs[i];return `<div class="act"><div class="at" ${rtl&&t?'dir="rtl" lang="ar"':''}>${esc(t||q.t)}</div><div class="am"><span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span><span>Open</span></div></div>`;}).join('');
   const ppl=`<p class="note" style="margin-bottom:8px">${r.real?'Named from the introductions. Anyone who didn’t introduce themselves is listed as Speaker 1, 2… Tap a person to change the name.':r.kind==='solo'?'Named from the voice introductions at the start.':'Named from each person’s login on their own phone.'} ${r.status==='sent'?'Emailed '+esc(r.sentAt)+'.':'The report is emailed to everyone listed.'}</p>`+r.people.map((p,k)=>`<${r.real?`button data-act="rep-person" data-p="${k}"`:'div'} class="prow ${r.real?'tap':''}"><span class="av lg" style="--c:${p.c}">${ini(p.n)}</span><div class="grow"><b dir="auto">${esc(p.n)}</b>${[p.r,p.d,p.o].filter(Boolean).length?`<small dir="auto">${esc([p.r,p.d,p.o].filter(Boolean).join(' · '))}</small>`:''}${p.e||p.ph?`<small>${[p.e,p.ph].filter(Boolean).map(esc).join(' · ')}</small>`:''}${r.real&&!p.e?`<span class="addmail" data-act="rep-person" data-p="${k}" data-focus="email">+ Add email</span>`:(!r.real&&!p.e?'<small>No email on file</small>':'')}</div>${r.real?I('fwd','s'):''}</${r.real?'button':'div'}>`).join('');
-  const tx=`<p class="note">${lang==='orig'?'Exactly as spoken, in the original languages, with your edits. ':lang==='ar'&&r.real?(tr&&!tr.txDone?'Translating the transcript… lines show in English until it is ready. ':'Shown in Arabic. Lines first said in Arabic are shown as spoken. '):r.real?(onlyEnglish(r)?'':'Shown in English. Tap Orig to see it as spoken. '):'Clean transcript: grammar fixed and filler words removed. '}${lang==='orig'||lang==='ar'?'':lang!=='en'?'Shown in English with the original words underneath.':n?'Orange words were unclear in the audio. Tap one to check it.':'Tap a name to change who said it.'}</p>`+r.tx.map((l,i)=>{const p=who(l.p);return `<div class="txl"><div class="th">${r.real?`<button class="sp" style="--c:${p.c}" data-act="rep-person" data-p="${l.p}" aria-label="Rename ${esc(p.n)}">${esc(first(p.n))}</button>`:`<span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span>`}<span>${l.t}</span></div>${(()=>{
+  const tx=`<p class="note">${lang==='orig'?'Exactly as spoken, in the original languages, with your edits. ':isL2&&r.real?(tr&&!tr.txDone?'Translating the transcript… lines show in English until it is ready. ':`Shown in ${l2[2]}. `):r.real?(onlyEnglish(r)?'':'Shown in English. Tap Orig to see it as spoken. '):'Clean transcript: grammar fixed and filler words removed. '}${lang==='orig'||(isL2&&r.real)?'':lang!=='en'?'Shown in English with the original words underneath.':n?'Orange words were unclear in the audio. Tap one to check it.':'Tap a name to change who said it.'}</p>`+r.tx.map((l,i)=>{const p=who(l.p);return `<div class="txl"><div class="th">${r.real?`<button class="sp" style="--c:${p.c}" data-act="rep-person" data-p="${l.p}" aria-label="Rename ${esc(p.n)}">${esc(first(p.n))}</button>`:`<span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span>`}<span>${l.t}</span></div>${(()=>{
       const isAr=l.o&&/[\u0600-\u06FF]/.test(l.o);
       if(lang==='orig')return `<div class="tt" dir="auto"${isAr?' lang="ar"':''}>${l.o?esc(l.o):rt(r,'t'+i,l.s)}</div>`;
-      if(lang==='ar'&&r.real)return `<div class="tt" dir="rtl" lang="ar">${esc(isAr&&r.ed['t'+i]==null?l.o:(tr&&tr.tx&&tr.tx[i])||plain(r,l.s))}</div>`;
+      if(isL2&&r.real)return `<div class="tt" dir="${rtl?'rtl':'auto'}" lang="${lang}">${esc(lang==='ar'&&isAr&&r.ed['t'+i]==null?l.o:(tr&&tr.tx&&tr.tx[i])||plain(r,l.s))}</div>`;
       return `<div class="tt" ${E('t'+i,'tx')}>${rt(r,'t'+i,l.s)}</div>${l.o&&!r.real?`<div class="to" dir="auto"${isAr?' lang="ar"':''}>${esc(l.o)}</div>`:''}`;})()}</div>`;}).join('');
   let seed=7;const rnd=()=>{seed=(seed*16807)%2147483647;return seed/2147483647;};
   const bars=r.tx.map(l=>Array.from({length:Math.max(4,Math.round(l.s.length/12))},()=>`<i style="--c:${who(l.p).c};height:${20+Math.round(rnd()*80)}%"></i>`).join('')+'<i style="--c:#D5D2D0;height:8%"></i>').join('');
@@ -1062,7 +1074,7 @@ const ACT={
  'lv-kind'(){const s=ST.solo;s.lkind=s.lkind==='call'?'video':'call';render();toast(s.lkind==='call'?'Call or meeting: you get minutes':'Video or lecture: you get learning notes');},
  'lv-mini'(){ST.solo.mini=!ST.solo.mini;render();},
  'lv-tr'(){const s=ST.solo;s.ltr=!s.ltr;render();},
- 'lv-lang'(){const s=ST.solo;s.ltarget=s.ltarget==='ar'?'en':'ar';s.ltr=true;render();toast('Showing the text in '+(s.ltarget==='ar'?'Arabic':'English'));},
+ 'lv-lang'(){openLangs('lis',ST.solo.ltarget||'en');},
  async 'lv-copy'(){const t=liveAllText();if(!t)return toast('Nothing to copy yet');try{await navigator.clipboard.writeText(t);toast('Text copied');}catch(e){toast('Could not copy on this browser');}},
  'lv-txt'(){const t=liveAllText();if(!t)return toast('Nothing to save yet');saveAudio(new Blob([t+'\n'],{type:'text/plain;charset=utf-8'}),'ForgeHype_Listen_'+new Date().toISOString().slice(0,10)+'.txt');},
  'lv-doc'(){const ps=liveParas();if(!ps.length)return toast('Nothing to save yet');
@@ -1071,7 +1083,7 @@ const ACT={
  'lv-link'(){sheet(`<h3>Watch a YouTube video here</h3><p>In YouTube tap Share, copy the link and paste it. The video plays at the top of this page while the text is written below it.</p><div class="stk"><label class="fld"><span>Video link</span><input id="lisUrl" value="${esc(ST.solo.lurl||'')}" placeholder="https://youtu.be/…" inputmode="url" autocomplete="off" autocapitalize="none"></label><button class="btnk" data-act="lv-link-ok">Use this video</button>${ytId(ST.solo.lurl)?'<button class="btng" data-act="lv-link-no">Remove the video</button>':''}<button class="btng" data-act="close">Cancel</button></div>`);},
  'lv-link-ok'(){const s=ST.solo;if(!ytId(s.lurl))return toast('That is not a YouTube video link');closeSheet();render();},
  'lv-link-no'(){ST.solo.lurl='';closeSheet();render();},
- 'lv-help'(){sheet(`<h3>How Listen works</h3><div class="helpsc"><ol class="steps"><li>Press the round button to start. On a phone, allow the microphone. On a computer, pick the tab that is playing and keep “Also share tab audio” on.</li><li>The bars on the left show the volume being captured. If they stay empty, nothing is being heard.</li><li>The words appear in the card as they are spoken. Grey words are still being worked out. Every four sentences become a paragraph.</li><li>Switch on the EN toggle to see the text in English. “To Arabic” changes the language.</li><li>The number on the right is how many different voices were heard.</li><li>Copy, TXT and Word save the text you see.</li><li>Press the button again to stop. The transcript opens for checking, and you can create the notes.</li></ol>
+ 'lv-help'(){sheet(`<h3>How Listen works</h3><div class="helpsc"><ol class="steps"><li>Press the round button to start. On a phone, allow the microphone. On a computer, pick the tab that is playing and keep “Also share tab audio” on.</li><li>The bars on the left show the volume being captured. If they stay empty, nothing is being heard.</li><li>The words appear in the card as they are spoken. Grey words are still being worked out. Every four sentences become a paragraph.</li><li>Switch on the EN toggle to see the text in English. The language button next to it opens the list of languages.</li><li>The number on the right is how many different voices were heard.</li><li>Copy, TXT and Word save the text you see.</li><li>Press the button again to stop. The transcript opens for checking, and you can create the notes.</li></ol>
    <p><b>On a phone.</b> Tap “YouTube link” to play the video inside this page. Keep the sound on the loudspeaker and stay on this page, because the phone stops the recording if you leave.</p>
    <p><b>Small view.</b> The corner button shrinks Listen to the bottom third of the screen, with the video filling the rest.</p>
    <p><b>Calls.</b> Tell people they are being recorded before you start.</p></div><div class="stk"><button class="btnk" data-act="close">Got it</button></div>`);},
@@ -1123,7 +1135,11 @@ const ACT={
    Object.assign(s,{phase:'idle',t:0,paused:false,introEndMs:0,speakers:[],result:null,title:'',rid:null,err:'',mid:null,parts:null,blob:null});
    openReport(r.id);ST.open['r-tx']=!autoReport();render();window.scrollTo(0,0);if(autoReport())makeMinutes(r);},
  'rep-seek'(el,e){const a=$('.aud'),b=el.getBoundingClientRect();if(!a||!b.width)return;a.currentTime=Math.max(0,Math.min(1,(e.clientX-b.left)/b.width))*(+el.dataset.tot)/1000;a.play().catch(()=>{});},
- 'rep-l'(el){saveAll();const l=el.dataset.l;ST.rep.lang=l;if(l!=='en')ST.rep.edit=false;ST.rep.shim=true;if(l==='ar')ST.open['r-tx']=ST.open['r-tx']||false;render();},
+ 'rep-l'(el){saveAll();const l=el.dataset.l;ST.rep.lang=l;if(l!=='en')ST.rep.edit=false;ST.rep.shim=true;render();},
+ 'rep-l2'(){saveAll();openLangs('rep',ST.rep.lang!=='en'&&ST.rep.lang!=='orig'?ST.rep.lang:lang2());},
+ 'lang-pick'(el){const c=el.dataset.c;closeSheet();
+   if(el.dataset.for==='lis'){const s=ST.solo;s.ltarget=c;s.ltr=true;render();toast('Showing the text in '+langOf(c)[2]);return;}
+   try{localStorage.setItem(lang2Key(),c);}catch(e){}ST.rep.lang=c;ST.rep.edit=false;ST.rep.shim=true;render();},
  'tpl-manage'(){openTemplates(null);},
  'tpl-choose'(){const r=curRep();if(r)openTemplates(r.id);},
  'tpl-use'(el){const r=ST.reports.find(x=>x.id===ST.tplFor);closeSheet();if(!r)return;saveAll();makeMinutes(r,el.dataset.id);},
