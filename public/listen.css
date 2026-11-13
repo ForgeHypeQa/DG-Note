@@ -137,3 +137,10 @@ body:has(.lis-mini){background:#000}
 /* Qalm logo */
 .qlogo{display:block;height:46px;width:auto}
 .qlogo.xl{height:90px}
+
+/* language settings and the transcript's own switch */
+.lrowb.two{text-align:start}.lrowb.two small{display:block;font-size:12.5px;color:var(--mut)}.lrowb.two b{display:block;font-size:16.5px;font-weight:700;margin-top:1px}
+.txsw{display:flex;justify-content:flex-start;margin-bottom:10px}
+.lseg.sm{background:color-mix(in srgb,var(--fg) 7%,transparent);padding:3px}
+.lseg.sm button{font-size:12.5px;padding:0 12px;min-width:0;color:var(--fg2);letter-spacing:0}
+.lseg.sm button.on{background:var(--fg);color:var(--cardbg,#fff)}

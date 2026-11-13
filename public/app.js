@@ -52,11 +52,22 @@ const LANG2=[['ar','AR','Arabic','العربية'],['bn','BN','Bangla','বা�
   ['zh','ZH','Chinese','中文'],['ja','JA','Japanese','日本語'],['ko','KO','Korean','한국어'],['th','TH','Thai','ไทย']];
 const langOf=c=>c==='en'?['en','EN','English','English']:(LANG2.find(x=>x[0]===c)||LANG2[0]);
 const isRtl=c=>c==='ar'||c==='ur';
-const lang2Key=()=>'dg-lang2-'+(ME_USER?.id||'x');
-const lang2=()=>{try{const c=localStorage.getItem(lang2Key());return LANG2.some(x=>x[0]===c)?c:'ar';}catch(e){return 'ar';}};
+const LANG_ALL=[['en','EN','English','English'],...LANG2];
+const lsGet=k=>{try{return localStorage.getItem(k+(ME_USER?.id||'x'));}catch(e){return null;}},lsSet=(k,v)=>{try{localStorage.setItem(k+(ME_USER?.id||'x'),v);}catch(e){}};
+const lang1=()=>{const c=lsGet('dg-lang1-');return LANG_ALL.some(x=>x[0]===c)?c:'en';};
+const lang2Pref=()=>{const c=lsGet('dg-lang2-');return LANG_ALL.some(x=>x[0]===c)?c:'auto';};
+// The second language of a report: the user's fixed choice, or else the other language spoken in it.
+function secFor(r){const p=lang1(),c=lang2Pref();if(c!=='auto'&&c!==p)return c;
+  const spoken=(r?repLangs(r):[]).find(x=>x!==p&&LANG_ALL.some(y=>y[0]===x));return spoken||(p==='en'?'ar':'en');}
+function openLangSet(){const p=lang1(),c=lang2Pref(),r=curRep();
+  sheet(`<h3>Languages</h3><p>Set this once. Every report opens in your first language, and your second language is one tap away.</p><div class="stk">
+    <button class="lrowb two" data-act="lang-list" data-for="p1"><span class="grow"><small>First language</small><b>${langOf(p)[2]}</b></span>${I('fwd','s')}</button>
+    <button class="lrowb two" data-act="lang-list" data-for="p2"><span class="grow"><small>Second language</small><b>${c==='auto'||c===p?'Automatic: the other language spoken'+(r&&r.real?' · '+langOf(secFor(r))[2]+' in this report':''):langOf(c)[2]}</b></span>${I('fwd','s')}</button>
+    <button class="btnk" data-act="close">Done</button></div>`);}
 function openLangs(forWhat,cur){
-  const rows=(forWhat==='lis'?[['en','EN','English','English'],...LANG2]:LANG2).map(([c,sh,n,own])=>`<button class="lrowb" data-act="lang-pick" data-c="${c}" data-for="${forWhat}"><span class="grow">${n} <small>${own===n?'':own}</small></span>${c===cur?I('check','s'):`<small>${sh}</small>`}</button>`).join('');
-  sheet(`<h3>${forWhat==='lis'?'Show the text in':'Second language'}</h3><p>${forWhat==='lis'?'The live text is shown in this language when the toggle is on.':'The report and transcript are translated into this language. English and the original stay available.'}</p><div class="helpsc">${rows}</div><div class="stk"><button class="btng" data-act="close">Cancel</button></div>`);
+  const T={lis:['Show the text in','The live text is shown in this language when the toggle is on.'],p1:['First language','Reports open in this language.'],p2:['Second language','One tap switches a report to this language.']}[forWhat];
+  const row=(c,n,own,sh)=>`<button class="lrowb" data-act="lang-pick" data-c="${c}" data-for="${forWhat}"><span class="grow">${n} <small>${own===n?'':own}</small></span>${c===cur?I('check','s'):`<small>${sh}</small>`}</button>`;
+  sheet(`<h3>${T[0]}</h3><p>${T[1]}</p><div class="helpsc">${forWhat==='p2'?row('auto','Automatic','the other language spoken in the meeting',''):''}${LANG_ALL.filter(x=>forWhat!=='p2'||x[0]!==lang1()).map(([c,sh,n,own])=>row(c,n,own,sh)).join('')}</div><div class="stk"><button class="btng" data-act="${forWhat==='lis'?'close':'lang-set'}">${forWhat==='lis'?'Cancel':'Back'}</button></div>`);
 }
 /* Unclear words are written {{id|heard|alternative}} */
 const TR={
@@ -99,7 +110,7 @@ const T=(fn,ms)=>{const id=setTimeout(fn,ms);TM.push(id);return id;};
 function fresh(){
   TM.forEach(clearTimeout);TM=[];
   ST={tab:'solo',open:{},
-   solo:{mode:'solo',lkind:'video',lmic:true,live:[],voices:0,ltr:false,ltarget:'en',mini:false,lurl:'',phase:'idle',title:'',t:0,paused:false,introEndMs:0,startedAt:0,speakers:[],result:null,blob:null,mid:null,rid:null,step:'',err:'',upPct:0,pending:null},
+   solo:{mode:'solo',lkind:'video',lmic:true,live:[],voices:0,ltr:false,ltarget:null,mini:false,lurl:'',phase:'idle',title:'',t:0,paused:false,introEndMs:0,startedAt:0,speakers:[],result:null,blob:null,mid:null,rid:null,step:'',err:'',upPct:0,pending:null},
    group:{phase:'lobby',live:true,joined:false,sim:false,elapsed:23*60+14,paused:false,hands:[],sharing:null,stageOpen:true,chat:[],qs:[],talk:'sara',unChat:0,unQs:0,
      people:['sara','priya','noura','fatima','joseph','rami'],pi:0,rid:null,
      upcoming:[{t:'Medication Safety Review',w:'Tomorrow · 11:00',by:'Noura'},{t:'Monthly Quality & Incidents',w:'Thu 12 Nov · 14:00',by:'Rami'}]},
@@ -152,7 +163,7 @@ async function readToggle(sec){
   if(RD.on&&RD.sec===sec){RD.paused=!RD.paused;RD.tok=Math.random();try{speechSynthesis.cancel();}catch(e){}readSync();if(!RD.paused)setTimeout(readNext,120);return;}   // pause keeps the place; play carries on from it
   readStop();const q=readPieces(sec);if(!q.length)return toast('Nothing to read in this section yet');
   if(!loadVoices().length)await new Promise(r=>setTimeout(r,700)),loadVoices();
-  Object.assign(RD,{on:true,paused:false,sec,q,i:0,rid:curRep()?.id,view:ST.rep.lang,spoke:false,tok:Math.random()});
+  Object.assign(RD,{on:true,paused:false,sec,q,i:0,rid:curRep()?.id,lang:ST.rep.lang,view:sec==='r-tx'&&ST.rep.txOrig!==false?'orig':ST.rep.lang,spoke:false,tok:Math.random()});
   $$('.aud').forEach(a=>a.pause());readSync();readNext();
 }
 function drawer(id,title,count,body,defOpen,preview){
@@ -571,7 +582,7 @@ function liveFinish(){
 function liveEnd(){LIVE.on=false;clearTimeout(LIVE.rt);clearInterval(LIVE.ka);const ws=LIVE.ws;LIVE.ws=null;try{if(LIVE.mr&&LIVE.mr.state!=='inactive')LIVE.mr.stop();}catch(e){}LIVE.mr=null;try{ws&&ws.close();}catch(e){}
   LIVE.pend=[];cancelAnimationFrame(LIVE.raf);try{LIVE.ctx&&LIVE.ctx.close();}catch(e){}LIVE.ctx=null;LIVE.level=0;}
 function liveSoon(){if(LIVE.tmr)return;LIVE.tmr=setTimeout(()=>{LIVE.tmr=0;liveRender();},250);}
-const liveView=()=>{const s=ST.solo;return !s.ltr?'orig':(s.ltarget||'en');};
+const liveView=()=>{const s=ST.solo;return !s.ltr?'orig':(s.ltarget||lang1());};
 // Text is shown as paragraphs of four sentences.
 const SENT=/[^.?!؟।。]+(?:[.?!؟।。]+["”’)]*\s*|$)/g;
 function parasOf(text){const ss=(String(text||'').match(SENT)||[]).filter(x=>x.trim()),out=[];for(let i=0;i<ss.length;i+=4)out.push(ss.slice(i,i+4).join('').trim());return out;}
@@ -598,7 +609,7 @@ function viewListen(){
   const s=ST.solo;
   if(s.phase!=='idle'&&!isListen())return capsheet(`<div class="eyebrow">Calls and videos</div><h1 class="lt">Listen</h1><p class="sub">A Solo meeting is in progress. Finish it before you start Listen.</p>`,`<button class="cta" data-tab="solo">Open Solo</button>`);
   if(s.phase!=='idle'&&s.phase!=='meet')return viewSolo(true);
-  const rec=s.phase==='meet',ok=canListen(),k=s.lkind||'video',tg=s.ltarget||'en';
+  const rec=s.phase==='meet',ok=canListen(),k=s.lkind||'video',tg=s.ltarget||lang1();
   const chip=(act,html,cls,attr)=>`<button class="lchip ${cls||''}" data-act="${act}" ${attr||''}>${html}</button>`;
   return `<div class="lv ${rec?'rec':''} ${s.mini?'mini':''}">
     <section class="lvcard">
@@ -751,7 +762,7 @@ async function translateReport(r,target){
     if(items.length){const j=await api('/api/translate',{target,items});j.items.forEach((t,k)=>put[k](t));}
     out.txDone=true;r.tr[target]=out;saveReport(r);
   }catch(e){
-    if(!r.tr[target]||r.tr[target].v!==v){ST.rep.lang='orig';}
+    if(!r.tr[target]||r.tr[target].v!==v){ST.rep.lang='en';}
     sheet(`<h3>The ${langOf(target)[2]} version could not be made</h3><p>${esc(e.message)}</p><div class="stk"><button class="btnk" data-act="close">OK</button></div>`);
   }
   ST.rep.translating=false;if(curRep()===r)render();
@@ -974,9 +985,11 @@ function viewReports(){
      <div id="repList" style="display:flex;flex-direction:column;gap:10px">${repListHTML()}</div>`);
 }
 function repDetail(r){
-  const lang=ST.rep.lang, L=LBL[lang]||LBL.en, rtl=isRtl(lang), isL2=lang!=='en'&&lang!=='orig', l2=langOf(isL2?lang:lang2()), ed=ST.rep.edit&&lang==='en'&&r.status==='draft';
+  if(ST.rep.lang==='orig')ST.rep.lang=r.real?lang1():'en';
+  const lang=ST.rep.lang, L=LBL[lang]||LBL.en, rtl=isRtl(lang), isL2=lang!=='en', l2=langOf(lang), txo=r.real&&ST.rep.txOrig!==false,
+    lsegHTML=`<span class="lseg" role="group" aria-label="Report language">${[lang1(),secFor(r)].map(c=>`<button class="${lang===c?'on':''}" data-act="rep-l" data-l="${c}" aria-label="${langOf(c)[2]}">${langOf(c)[1]}</button>`).join('')}</span><button class="rdb top" data-act="lang-set" aria-label="Language settings" style="margin:0 0 0 8px">${li(LIc.globe)}</button>`, ed=ST.rep.edit&&lang==='en'&&r.status==='draft';
   // Real reports: Arabic comes from a translation made on demand and kept with the report (redone after edits).
-  const tr=lang==='en'||lang==='orig'?null:r.real?(r.tr[lang]&&r.tr[lang].v===(r.v||0)&&(r.tr[lang].txDone||ST.rep.translating)?r.tr[lang]:null):r.tr[lang];
+  const tr=lang==='en'?null:r.real?(r.tr[lang]&&r.tr[lang].v===(r.v||0)&&(r.tr[lang].txDone||ST.rep.translating)?r.tr[lang]:null):r.tr[lang];
   if(r.real&&isL2&&!tr&&!ST.rep.translating)setTimeout(()=>translateReport(r,lang),0);
   const E=(key,list)=>ed?`data-ek="${key}" data-list="${list}" contenteditable="true"`:'';
   const txt=(key,src,trTxt)=> (tr&&r.ed[key]==null&&trTxt!=null)?esc(trTxt):rt(r,key,src);
@@ -986,11 +999,11 @@ function repDetail(r){
   // Section headings from the report's template (translated in Arabic), else the standard ones.
   const lay=r.real&&mins==='done'&&Array.isArray(r.layout)?r.layout:null;
   const T=(field,fallback)=>{const e=lay&&lay.find(x=>x.field===field);return e?((tr&&tr.titles&&tr.titles[e.key])||e.title):fallback;};
-  if(r.real&&isL2&&!tr)return capsheet(`<div class="bar"><button class="back" data-act="rep-back">${I('back')}Recap</button><span class="grow"></span><span class="lseg" role="group" aria-label="Language">${`<button class="${lang==='en'?'on':''}" data-act="rep-l" data-l="en" aria-label="English">EN</button><button class="${isL2?'on':''}" data-act="rep-l2" aria-label="Second language: ${l2[2]}. Tap to choose">${l2[1]}<i class="car">▾</i></button><button class="${lang==='orig'?'on':''}" data-act="rep-l" data-l="orig" aria-label="As spoken">Orig</button>`}</span></div>
+  if(r.real&&isL2&&!tr)return capsheet(`<div class="bar"><button class="back" data-act="rep-back">${I('back')}Recap</button><span class="grow"></span>${lsegHTML}</div>
       <h1 class="mt">${esc(r.title)}</h1><div class="writing"><span class="gdots"><i></i><i></i><i></i></span>Translating the report into ${l2[2]}…</div>`,
     `<p class="fine">The report comes first, in a few seconds. The transcript follows. Tap EN to go back.</p>`);
   const cap=`<div class="bar"><button class="back" data-act="rep-back">${I('back')}Recap</button><span class="grow"></span>
-      ${r.real&&mins==='done'?readBtn('all','top'):''}${r.real?`<span class="lseg" role="group" aria-label="Language">${`<button class="${lang==='en'?'on':''}" data-act="rep-l" data-l="en" aria-label="English">EN</button><button class="${isL2?'on':''}" data-act="rep-l2" aria-label="Second language: ${l2[2]}. Tap to choose">${l2[1]}<i class="car">▾</i></button><button class="${lang==='orig'?'on':''}" data-act="rep-l" data-l="orig" aria-label="As spoken">Orig</button>`}</span>`
+      ${r.real&&mins==='done'?readBtn('all','top'):''}${r.real?`${lsegHTML}`
         :Object.keys(r.tr).length?`<button class="pillb" data-act="rep-lang">${I('globe','s')}${LANG[lang].name}</button>`:''}
       ${r.status==='draft'&&lang==='en'?`<button class="pillb ${ed?'on':''}" data-act="rep-edit">${ed?'Done':'Edit'}</button>`:''}</div>
     <div class="kind">${I(KIND_ICON[r.kind]||'people','s')}<span>${KIND_NAME[r.kind]||'Group'} · ${r.people.length} people</span>${repStatus(r)}</div>
@@ -1007,9 +1020,9 @@ function repDetail(r){
   const act=r.act.map((a,i)=>{const p=who(a.p),t=tr&&tr.act[i];return `<div class="act"><div class="at ${rtl?'rtl':''}" ${rtl?'dir="rtl" lang="ar"':''} ${E('a'+i,'act')}>${txt('a'+i,a.t,t&&t.t)}</div><div class="am"><span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span><span>${esc((t?t.due:a.due)||'No date')}</span></div></div>`;}).join('');
   const qs=r.qs.map((q,i)=>{const p=who(q.p),t=tr&&tr.qs[i];return `<div class="act"><div class="at" ${rtl&&t?'dir="rtl" lang="ar"':''}>${esc(t||q.t)}</div><div class="am"><span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span><span>Open</span></div></div>`;}).join('');
   const ppl=`<p class="note" style="margin-bottom:8px">${r.real?'Named from the introductions. Anyone who didn’t introduce themselves is listed as Speaker 1, 2… Tap a person to change the name.':r.kind==='solo'?'Named from the voice introductions at the start.':'Named from each person’s login on their own phone.'} ${r.status==='sent'?'Emailed '+esc(r.sentAt)+'.':'The report is emailed to everyone listed.'}</p>`+r.people.map((p,k)=>`<${r.real?`button data-act="rep-person" data-p="${k}"`:'div'} class="prow ${r.real?'tap':''}"><span class="av lg" style="--c:${p.c}">${ini(p.n)}</span><div class="grow"><b dir="auto">${esc(p.n)}</b>${[p.r,p.d,p.o].filter(Boolean).length?`<small dir="auto">${esc([p.r,p.d,p.o].filter(Boolean).join(' · '))}</small>`:''}${p.e||p.ph?`<small>${[p.e,p.ph].filter(Boolean).map(esc).join(' · ')}</small>`:''}${r.real&&!p.e?`<span class="addmail" data-act="rep-person" data-p="${k}" data-focus="email">+ Add email</span>`:(!r.real&&!p.e?'<small>No email on file</small>':'')}</div>${r.real?I('fwd','s'):''}</${r.real?'button':'div'}>`).join('');
-  const tx=`<p class="note">${lang==='orig'?'Exactly as spoken, in the original languages, with your edits. ':isL2&&r.real?(tr&&!tr.txDone?'Translating the transcript… lines show in English until it is ready. ':`Shown in ${l2[2]}. `):r.real?(onlyEnglish(r)?'':'Shown in English. Tap Orig to see it as spoken. '):'Clean transcript: grammar fixed and filler words removed. '}${lang==='orig'||(isL2&&r.real)?'':lang!=='en'?'Shown in English with the original words underneath.':n?'Orange words were unclear in the audio. Tap one to check it.':'Tap a name to change who said it.'}</p>`+r.tx.map((l,i)=>{const p=who(l.p);return `<div class="txl"><div class="th">${r.real?`<button class="sp" style="--c:${p.c}" data-act="rep-person" data-p="${l.p}" aria-label="Rename ${esc(p.n)}">${esc(first(p.n))}</button>`:`<span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span>`}<span>${l.t}</span></div>${(()=>{
+  const tx=`${r.real?`<div class="txsw"><span class="lseg sm" role="group" aria-label="Transcript text"><button class="${txo?'on':''}" data-act="tx-orig" data-v="1">As spoken</button><button class="${txo?'':'on'}" data-act="tx-orig" data-v="0">${l2[2]}</button></span></div>`:''}<p class="note">${txo?'Exactly as spoken, in the original languages. ':isL2&&r.real?(tr&&!tr.txDone?'Translating the transcript… lines show in English until it is ready. ':`Shown in ${l2[2]}. `):r.real?(onlyEnglish(r)?'':'Shown in English. '):'Clean transcript: grammar fixed and filler words removed. '}${txo||(isL2&&r.real)?'':lang!=='en'?'Shown in English with the original words underneath.':n?'Orange words were unclear in the audio. Tap one to check it.':'Tap a name to change who said it.'}</p>`+r.tx.map((l,i)=>{const p=who(l.p);return `<div class="txl"><div class="th">${r.real?`<button class="sp" style="--c:${p.c}" data-act="rep-person" data-p="${l.p}" aria-label="Rename ${esc(p.n)}">${esc(first(p.n))}</button>`:`<span class="sp" style="--c:${p.c}">${esc(first(p.n))}</span>`}<span>${l.t}</span></div>${(()=>{
       const isAr=l.o&&/[\u0600-\u06FF]/.test(l.o);
-      if(lang==='orig')return `<div class="tt" dir="auto"${isAr?' lang="ar"':''}>${l.o?esc(l.o):rt(r,'t'+i,l.s)}</div>`;
+      if(txo)return `<div class="tt" dir="auto"${isAr?' lang="ar"':''}>${l.o?esc(l.o):rt(r,'t'+i,l.s)}</div>`;
       if(isL2&&r.real)return `<div class="tt" dir="${rtl?'rtl':'auto'}" lang="${lang}">${esc(lang==='ar'&&isAr&&r.ed['t'+i]==null?l.o:(tr&&tr.tx&&tr.tx[i])||plain(r,l.s))}</div>`;
       return `<div class="tt" ${E('t'+i,'tx')}>${rt(r,'t'+i,l.s)}</div>${l.o&&!r.real?`<div class="to" dir="auto"${isAr?' lang="ar"':''}>${esc(l.o)}</div>`:''}`;})()}</div>`;}).join('');
   let seed=7;const rnd=()=>{seed=(seed*16807)%2147483647;return seed/2147483647;};
@@ -1020,8 +1033,7 @@ function repDetail(r){
     :r.status==='sent'?`<span class="sentl">${I('check','s')}${r.real?'Approved':'Sent to '+r.people.filter(p=>p.e).length+' people'}</span><button class="dbt ic" data-act="rep-copy" aria-label="Copy summary">${I('copy','s')}</button>`
     :`<button class="dbt ic" data-act="rep-copy" aria-label="Copy summary">${I('copy','s')}</button><button class="dbt acc" data-act="rep-send">Approve &amp; send</button>`;
   return capsheet(cap,
-    `${r.real&&lang==='orig'?(onlyEnglish(r)?'':`<p class="note">Transcript as spoken. The report itself is written in English. <button data-act="rep-en" style="font-weight:700;color:var(--accink)">Show the transcript in English</button></p>`):''}
-     ${lang!=='en'&&lang!=='orig'&&tr?`<p class="note">Translated from English by AI. The English original is kept. <button data-act="rep-en" style="font-weight:700;color:var(--accink)">Show original</button></p>`:''}
+    `${lang!=='en'&&tr?`<p class="note">Translated from English by AI. The English original is kept. <button data-act="rep-en" style="font-weight:700;color:var(--accink)">Show original</button></p>`:''}
      ${ed&&r.real?`<p class="note">Tap any transcript line to change it. Changes are saved in the change history.</p>`:ed?`<p class="note">Tap any text to change it, or use Dictate. Dictated words are cleaned up for grammar and spelling.</p>`:''}
      ${lay?lay.filter(e=>e.field!=='summary').map(e=>{
         const title=esc((tr&&tr.titles&&tr.titles[e.key])||e.title),none=t=>`<p class="fine" style="text-align:start">${t}</p>`;
@@ -1067,7 +1079,7 @@ function render(){
   $('#view').innerHTML = ST.tab==='solo'?viewSolo():ST.tab==='listen'?viewListen():ST.tab==='group'?viewGroup():viewReports();
   if(ST.tab==='solo'||ST.tab==='listen') syncSolo();
   syncPlayer();
-  if(RD.on&&(ST.tab!=='reports'||curRep()?.id!==RD.rid||ST.rep.lang!==RD.view))readStop();
+  if(RD.on&&(ST.tab!=='reports'||curRep()?.id!==RD.rid||ST.rep.lang!==RD.lang))readStop();
   if(lf){liveSide();const b=$('#lvText');if(b)b.scrollTop=b.scrollHeight;}
   if(ST.tab==='group') syncGroup();
   ST.rep.shim=false;
@@ -1122,7 +1134,7 @@ const ACT={
  'lv-kind'(){const s=ST.solo;s.lkind=s.lkind==='call'?'video':'call';render();toast(s.lkind==='call'?'Call or meeting: you get minutes':'Video or lecture: you get learning notes');},
  'lv-mini'(){ST.solo.mini=!ST.solo.mini;render();},
  'lv-tr'(){const s=ST.solo;s.ltr=!s.ltr;render();},
- 'lv-lang'(){openLangs('lis',ST.solo.ltarget||'en');},
+ 'lv-lang'(){openLangs('lis',ST.solo.ltarget||lang1());},
  async 'lv-copy'(){const t=liveAllText();if(!t)return toast('Nothing to copy yet');try{await navigator.clipboard.writeText(t);toast('Text copied');}catch(e){toast('Could not copy on this browser');}},
  'lv-txt'(){const t=liveAllText();if(!t)return toast('Nothing to save yet');saveAudio(new Blob([t+'\n'],{type:'text/plain;charset=utf-8'}),'Qalm_Listen_'+new Date().toISOString().slice(0,10)+'.txt');},
  'lv-doc'(){const ps=liveParas();if(!ps.length)return toast('Nothing to save yet');
@@ -1185,10 +1197,15 @@ const ACT={
  read(el){readToggle(el.dataset.sec);},
  'rep-seek'(el,e){const a=$('.aud'),b=el.getBoundingClientRect();if(!a||!b.width)return;a.currentTime=Math.max(0,Math.min(1,(e.clientX-b.left)/b.width))*(+el.dataset.tot)/1000;a.play().catch(()=>{});},
  'rep-l'(el){saveAll();const l=el.dataset.l;ST.rep.lang=l;if(l!=='en')ST.rep.edit=false;ST.rep.shim=true;render();},
- 'rep-l2'(){saveAll();openLangs('rep',ST.rep.lang!=='en'&&ST.rep.lang!=='orig'?ST.rep.lang:lang2());},
- 'lang-pick'(el){const c=el.dataset.c;closeSheet();
-   if(el.dataset.for==='lis'){const s=ST.solo;s.ltarget=c;s.ltr=true;render();toast('Showing the text in '+langOf(c)[2]);return;}
-   try{localStorage.setItem(lang2Key(),c);}catch(e){}ST.rep.lang=c;ST.rep.edit=false;ST.rep.shim=true;render();},
+ 'lang-set'(){saveAll();openLangSet();},
+ 'lang-list'(el){const f=el.dataset.for;openLangs(f,f==='p1'?lang1():lang2Pref()===lang1()?'auto':lang2Pref());},
+ 'tx-orig'(el){ST.rep.txOrig=el.dataset.v==='1';render();},
+ 'lang-pick'(el){const c=el.dataset.c,f=el.dataset.for;
+   if(f==='lis'){closeSheet();const s=ST.solo;s.ltarget=c;s.ltr=true;render();toast('Showing the text in '+langOf(c)[2]);return;}
+   const r=curRep();
+   if(f==='p1'){lsSet('dg-lang1-',c);if(lang2Pref()===c)lsSet('dg-lang2-','auto');if(r){ST.rep.lang=c;ST.rep.edit=false;}}
+   else{lsSet('dg-lang2-',c);if(r){ST.rep.lang=secFor(r);ST.rep.edit=false;}}
+   ST.rep.shim=true;render();openLangSet();},
  'tpl-manage'(){openTemplates(null);},
  'tpl-choose'(){const r=curRep();if(r)openTemplates(r.id);},
  'tpl-use'(el){const r=ST.reports.find(x=>x.id===ST.tplFor);closeSheet();if(!r)return;saveAll();makeMinutes(r,el.dataset.id);},
@@ -1235,7 +1252,7 @@ const ACT={
  'g-create'(){const t=$('#nmTitle').value.trim()||'Untitled meeting',n=$$('.invc .on').length;ST.group.upcoming.unshift({t,w:'Today · 15:00',by:'you'});ST.open['g-up']=true;closeSheet();render();toast(`Invites sent to ${n} people by email and WhatsApp`);},
  /* ---- reports ---- */
  'rep-open'(el){openReport(el.dataset.id);},
- 'rep-back'(){saveAll();ST.rep.id=null;ST.rep.edit=false;ST.rep.lang='orig';render();window.scrollTo(0,0);},
+ 'rep-back'(){saveAll();ST.rep.id=null;ST.rep.edit=false;ST.rep.lang=lang1();render();window.scrollTo(0,0);},
  'rep-filter'(el){ST.rep.filter=el.dataset.f;render();},
  'rep-edit'(){saveAll();ST.rep.edit=!ST.rep.edit;if(ST.rep.edit){ST.open['r-dec']=true;}render();},
  'rep-lang'(){saveAll();sheet(`<h3>Show this report in</h3><p>Reports are written in English. Translate for anyone who needs it.</p><div style="margin-top:10px">${Object.keys(LANG).map(k=>`<button class="lrowb" data-act="rep-setlang" data-l="${k}"><span class="grow">${LANG[k].full}</span>${ST.rep.lang===k?I('check'):''}</button>`).join('')}<button class="lrowb" disabled>60+ more languages in the live app</button></div>`);},
@@ -1296,7 +1313,7 @@ const ACT={
  },
 };
 function saveAll(){$$('[data-ek]').forEach(saveEdit);}
-function openReport(id){ST.tab='reports';ST.rep.id=id;ST.rep.lang=ST.reports.find(x=>x.id===id)?.real?'orig':'en';ST.rep.edit=false;['r-dec','r-act','r-qs','r-ppl','r-tx','r-rec','r-hist'].forEach(k=>delete ST.open[k]);render();window.scrollTo(0,0);}
+function openReport(id){ST.tab='reports';ST.rep.id=id;ST.rep.lang=ST.reports.find(x=>x.id===id)?.real?lang1():'en';ST.rep.txOrig=true;ST.rep.edit=false;['r-dec','r-act','r-qs','r-ppl','r-tx','r-rec','r-hist'].forEach(k=>delete ST.open[k]);render();window.scrollTo(0,0);}
 const FORM={
  async login(){
    const btn=$('#lgBtn'),err=$('#lgErr');err.hidden=true;btn.disabled=true;btn.textContent='Signing in…';
@@ -1368,7 +1385,7 @@ async function signOut(){
 async function openAccount(){
   const u=ME_USER;if(!u)return;
   const head=`<div style="display:flex;gap:14px;align-items:center"><span class="av lg" style="--c:${u.role==='admin'?'#FF5D00':'#45D3C5'};width:54px;height:54px;font-size:16px">${esc(u.short)}</span><div><h3>${esc(u.name)}</h3><p style="margin:0">${u.role==='admin'?'Admin · full access':'Guest account'}</p></div></div>`;
-  const foot=`<div class="stk"><button class="lsw ${autoReport()?'on':''}" role="switch" aria-checked="${autoReport()}" data-act="set-auto"><span class="grow"><b>Create the report automatically</b><small>Off: you check the transcript first, then press Create the meeting report.</small></span><i></i></button>${u.role==='admin'?'<button class="btng" data-act="claude-check">Check meeting reports (Claude)</button><div id="ccOut"></div>':''}${installBtn('btng')}<button class="btnk" data-act="sign-out">Sign out</button>${u.role==='admin'?'<button class="btng" data-act="restart">Reset the sample data</button>':''}<button class="btng" data-act="close">Close</button></div>`;
+  const foot=`<div class="stk"><button class="btng" data-act="lang-set">${li(LIc.globe)} Languages: ${langOf(lang1())[2]} and ${lang2Pref()==='auto'?'automatic':langOf(lang2Pref())[2]}</button><button class="lsw ${autoReport()?'on':''}" role="switch" aria-checked="${autoReport()}" data-act="set-auto"><span class="grow"><b>Create the report automatically</b><small>Off: you check the transcript first, then press Create the meeting report.</small></span><i></i></button>${u.role==='admin'?'<button class="btng" data-act="claude-check">Check meeting reports (Claude)</button><div id="ccOut"></div>':''}${installBtn('btng')}<button class="btnk" data-act="sign-out">Sign out</button>${u.role==='admin'?'<button class="btng" data-act="restart">Reset the sample data</button>':''}<button class="btng" data-act="close">Close</button></div>`;
   if(u.role!=='admin'){sheet(head+`<p>Signed in on this device. Your meetings stay on this phone until the database is connected.</p>`+foot);return;}
   sheet(head+`<p id="admLoad">Loading who is online…</p>`+foot);
   try{
