@@ -30,3 +30,10 @@ export const getTranscription = id => call(`/transcriptions/${id}`);
 export const getTranscript = id => call(`/transcriptions/${id}/transcript`);
 export const deleteTranscription = id => call(`/transcriptions/${id}`, { method: 'DELETE' });
 export const deleteFile = id => call(`/files/${id}`, { method: 'DELETE' });
+
+// Real-time (streaming) transcription. The browser connects straight to the engine with a short-lived
+// key made here, so the real key never leaves the server.
+export const RT_MODEL = process.env.SONIOX_RT_MODEL || 'stt-rt-v6';
+export const RT_URL = process.env.SONIOX_RT_URL || 'wss://stt-rt.soniox.com/transcribe-websocket';
+export const tempKey = (seconds = 120) => call('/auth/temporary-api-key', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ usage_type: 'transcribe_websocket', expires_in_seconds: seconds, single_use: true, max_session_duration_seconds: 4 * 3600 }) });

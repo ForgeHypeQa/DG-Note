@@ -114,37 +114,27 @@ async function run(job, parts, mime, ext) {
   }
 }
 
-// Live text for Listen: the app sends the last few seconds as a small stand-alone clip and gets its
-// text back (as spoken, and in English). Nothing is kept. The full recording is still transcribed at the end.
-const liveBusy = new Map();
-app.post('/api/live/chunk', auth.requireUser, express.raw({ type: () => true, limit: '2mb' }), async (req, res) => {
+// Live text for Listen. The browser streams the sound straight to the speech engine with a
+// short-lived key and gets the words back as they are spoken. When the recording stops, the words
+// it received are turned into the final transcript here, so the audio is only transcribed once.
+app.post('/api/live/start', auth.requireUser, async (req, res) => {
   if (!engine.configured()) return res.status(503).json({ error: 'Transcription is not switched on for this server yet.' });
-  const buf = req.body; if (!buf || !buf.length) return res.status(400).json({ error: 'No audio received.' });
-  const uid = req.user.id, n = liveBusy.get(uid) || 0;
-  if (n >= 4) return res.status(429).json({ error: 'Live text is catching up.' });
-  liveBusy.set(uid, n + 1);
-  const mime = (req.headers['content-type'] || 'audio/webm').split(';')[0], ext = /mp4/.test(mime) ? 'm4a' : /ogg/.test(mime) ? 'ogg' : 'webm';
-  let fileId, trId;
   try {
-    fileId = (await engine.uploadFile(buf, `dg-live-${randomUUID()}.${ext}`, mime)).id;
-    trId = (await engine.createTranscription({ file_id: fileId, language_hints: ['en', 'ar'], enable_speaker_diarization: true, enable_language_identification: true, translation: { type: 'one_way', target_language: 'en' } })).id;
-    const started = Date.now();
-    for (;;) {
-      await sleep(700);
-      const st = await engine.getTranscription(trId);
-      if (st.status === 'completed') break;
-      if (st.status === 'error') throw new Error(st.error_message || 'transcription error');
-      if (Date.now() - started > 45000) throw new Error('timeout');
-    }
-    const r = buildResult((await engine.getTranscript(trId)).tokens, { roster: ROSTER, departments: DEPARTMENTS });
-    const strip = t => String(t || '').replace(/\{\{[^|]*\|([^|]*)\|\}\}/g, '$1');
-    res.json({ text: r.segments.map(g => g.orig || strip(g.text)).join(' ').trim(), en: r.segments.map(g => strip(g.text)).join(' ').trim(), voices: new Set(r.segments.map(g => g.speaker)).size, languages: r.languages || [] });
-  } catch (e) { console.warn('[live]', e.message); res.status(502).json({ error: 'This part could not be transcribed.' }); }
-  finally {
-    liveBusy.set(uid, Math.max(0, (liveBusy.get(uid) || 1) - 1));
-    if (trId) engine.deleteTranscription(trId).catch(() => {});
-    if (fileId) engine.deleteFile(fileId).catch(() => {});
-  }
+    const k = await engine.tempKey(120);
+    res.json({ url: engine.RT_URL, key: k.api_key, config: {
+      model: engine.RT_MODEL, audio_format: 'auto', language_hints: ['en', 'ar'],
+      enable_speaker_diarization: true, enable_language_identification: true, enable_endpoint_detection: true,
+      translation: { type: 'one_way', target_language: 'en' },
+      context: { terms: [...ROSTER.flatMap(p => [p.name, p.ar].filter(Boolean)), ...DOMAIN_TERMS] },
+    } });
+  } catch (e) { console.warn('[live start]', e.message); res.status(502).json({ error: 'Live text could not start.' }); }
+});
+app.post('/api/live/result', auth.requireUser, express.json({ limit: '12mb' }), (req, res) => {
+  const b = req.body || {};
+  if (!Array.isArray(b.tokens) || !b.tokens.length) return res.status(400).json({ error: 'No words were received.' });
+  const tokens = b.tokens.slice(0, 200000).map(t => ({ text: String(t.text ?? ''), start_ms: t.start_ms, end_ms: t.end_ms, confidence: t.confidence, speaker: t.speaker, language: t.language, translation_status: t.translation_status }));
+  try { res.json(buildResult(tokens, { durationMs: Math.max(0, +b.durationMs || 0), roster: ROSTER, departments: DEPARTMENTS })); }
+  catch (e) { console.warn('[live result]', e.message); res.status(500).json({ error: 'The transcript could not be built.' }); }
 });
 
 // Meeting minutes from a checked transcript. Body: { title, date, languages, people[], segments[{who,t,text}] }.

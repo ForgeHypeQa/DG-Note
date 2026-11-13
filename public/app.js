@@ -225,7 +225,7 @@ function upload(url,blob,onp,headers){return new Promise((res,rej)=>{const x=new
   x.upload.onprogress=e=>e.lengthComputable&&onp(e.loaded/e.total);
   x.onload=()=>{let b={};try{b=JSON.parse(x.responseText);}catch(e){}x.status<300?res(b):rej(new Error(x.status===401?'Please sign in again. Your recording is safe on this phone.':b.error||('Upload failed ('+x.status+')')));};
   x.onerror=()=>rej(new Error('Upload failed. Check the connection. Your recording is safe on this phone.'));x.send(blob);});}
-async function processMeeting(mid,fileBlob){
+async function processMeeting(mid,fileBlob,liveWords){
   const s=ST.solo; Object.assign(s,{phase:'proc',step:'save',err:'',upPct:0,mid,result:null,rid:null}); render(); window.scrollTo(0,0);
   try{
     let parts=fileBlob?[fileBlob]:null;
@@ -236,6 +236,10 @@ async function processMeeting(mid,fileBlob){
     if(!HEALTH||HEALTH.offline)await loadServer();
     if(HEALTH?.offline)throw new Error('Cannot reach the DG-Note server. Your recording is safe on this phone. Try again when you are online.');
     if(!HEALTH.engine)throw new Error('Transcription is not switched on for this server yet. Ask the admin. Your recording is safe on this phone.');
+    // Listen: the words streamed during the recording are the transcript. No second pass is needed.
+    let got=false;
+    if(liveWords&&liveWords.length){try{s.step='naming';render();s.result=await api('/api/live/result',{tokens:liveWords,durationMs:Math.round((s.t||0)*1000)});got=!!(s.result.segments||[]).length;}catch(e){got=false;}}
+    if(!got){
     s.step='upload';render();
     const q=new URLSearchParams({title:s.title||'',introEndMs:String(Math.round(s.introEndMs||0)),announceEndMs:String(Math.round(s.announceEndMs||0)),durationMs:String(Math.round((s.t||0)*1000))});
     const job=await upload(API+'/api/solo/jobs?'+q,blob,p=>{s.upPct=p;const e=$('#upPct');if(e)e.textContent=Math.round(p*100)+'%';},parts.length>1?{'X-Parts':parts.map(b=>b.size).join(',')}:{});
@@ -247,6 +251,7 @@ async function processMeeting(mid,fileBlob){
       if(j.status==='error')throw new Error(j.error||'Transcription failed.');
       if(j.status==='done'){s.result=j.result;break;}
       if(j.step!==s.step){s.step=j.step;if(onRecTab()&&s.phase==='proc')render();}
+    }
     }
     s.speakers=s.result.speakers.map((x,i)=>({...x,c:C[i%C.length],open:false,edited:false}));
     if(!s.speakers.length)throw new Error('No speech was found in the recording.');
@@ -452,44 +457,79 @@ async function listenPip(auto){
 const LSEG=14;
 const li=d=>`<svg class="i s" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
 const LIc={link:'<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>',file:'<path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8zM14 3v5h5"/>',help:'<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 114 2c-.9.6-1.5 1.1-1.5 2.2M12 17h.01"/>',min:'<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>',max:'<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',dl:'<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>',globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/>',b10:'<path d="M11 5L6 9l5 4M6 9h7a5 5 0 010 10H9"/>',f10:'<path d="M13 5l5 4-5 4M18 9h-7a5 5 0 000 10h4"/>'};
-// Live text: every 10 seconds the last stretch of sound is sent as a small clip and its text comes back.
-const LIVE={on:false,mr:null,timer:0,idx:0,level:0,peak:0,meterOk:false,ctx:null,raf:0};
+// Live text: the sound is streamed to the transcription service while it is recorded, and the words
+// come straight back. When the recording stops, the same words become the final transcript.
+const LIVE={on:false,ws:null,mr:null,fin:[],pend:[],orig:'',en:'',spk:new Set(),off:0,broken:false,ending:false,level:0,peak:0,meterOk:false,ctx:null,raf:0,ka:0,rt:0,tmr:0,ar:new Map(),onFinished:null,onDrop:null};
 function liveAnalyse(stream){
   try{const ctx=new (window.AudioContext||window.webkitAudioContext)(),an=ctx.createAnalyser();an.fftSize=1024;ctx.createMediaStreamSource(stream).connect(an);LIVE.ctx=ctx;LIVE.meterOk=true;
-    if(ctx.state!=='running')ctx.resume().catch(()=>{}).then(()=>{if(ctx.state!=='running')LIVE.meterOk=false;});
-    const buf=new Float32Array(an.fftSize),loop=()=>{an.getFloatTimeDomainData(buf);let q=0;for(const v of buf)q+=v*v;LIVE.level=Math.sqrt(q/buf.length);LIVE.peak=Math.max(LIVE.peak,LIVE.level);LIVE.raf=requestAnimationFrame(loop);};loop();}catch(e){LIVE.meterOk=false;}
+    if(ctx.state!=='running')ctx.resume().catch(()=>{});
+    const buf=new Float32Array(an.fftSize),loop=()=>{an.getFloatTimeDomainData(buf);let q=0;for(const v of buf)q+=v*v;LIVE.level=Math.sqrt(q/buf.length);LIVE.raf=requestAnimationFrame(loop);};loop();}catch(e){LIVE.meterOk=false;}
 }
-function liveCycle(){
-  if(!LIVE.on||!REC.stream)return;const mime=pickMime();let mr;try{mr=new MediaRecorder(REC.stream,mime?{mimeType:mime,audioBitsPerSecond:32000}:{});}catch(e){return;}
-  const parts=[],i=LIVE.idx++;LIVE.peak=0;mr.ondataavailable=e=>{if(e.data&&e.data.size)parts.push(e.data);};
-  mr.onstop=()=>{const blob=new Blob(parts,{type:mr.mimeType||mime||'audio/webm'});if(blob.size>2000&&mr._peak>0.006)liveSend(blob,i);};   // silence is not sent
-  LIVE.mr=mr;mr.start();
-  LIVE.timer=setTimeout(()=>{mr._peak=LIVE.meterOk?LIVE.peak:1;try{mr.stop();}catch(e){}liveCycle();},10000);
+// A word as spoken goes to "orig"; English words and translated words go to "en".
+function liveAdd(t,o){
+  const st=t.translation_status,sp=t.speaker!=null?String(t.speaker):'',turn=st!==o._st||sp!==o._sp;o._st=st;o._sp=sp;
+  const put=k=>{o[k]+=(turn&&o[k]&&!/\s$/.test(o[k])&&!/^[\s.,!?،؟]/.test(t.text)?' ':'')+t.text;};
+  if(st!=='translation'){put('orig');if(o.spk&&sp)o.spk.add(sp);}
+  if(st==='translation'||(st!=='original'&&(st==='none'||!t.language||t.language==='en')))put('en');
 }
-function liveGo(){if(!HEALTH||!HEALTH.engine||LIVE.on)return;LIVE.on=true;liveCycle();}
-function liveHalt(){LIVE.on=false;clearTimeout(LIVE.timer);const mr=LIVE.mr;if(mr&&mr.state!=='inactive'){mr._peak=LIVE.meterOk?LIVE.peak:1;try{mr.stop();}catch(e){}}LIVE.mr=null;}
-function liveEnd(){liveHalt();cancelAnimationFrame(LIVE.raf);try{LIVE.ctx&&LIVE.ctx.close();}catch(e){}LIVE.ctx=null;LIVE.level=0;}
-async function liveSend(blob,i){
-  const s=ST.solo,row={i,state:'wait',orig:'',en:'',ar:''};s.live.push(row);liveRender();
-  try{const r=await fetch(API+'/api/live/chunk',{method:'POST',headers:{'Content-Type':(blob.type||'audio/webm').split(';')[0]},body:blob});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'failed');
-    Object.assign(row,{state:'done',orig:j.text||'',en:j.en||j.text||''});s.voices=Math.max(s.voices||0,j.voices||0);
-    if(!row.orig)s.live=s.live.filter(x=>x!==row);else if(s.ltr&&s.ltarget==='ar')liveAr(row);
-  }catch(e){s.live=s.live.filter(x=>x!==row);}
-  liveRender();
+function liveReset(){Object.assign(LIVE,{fin:[],pend:[],orig:'',en:'',spk:new Set(),off:0,broken:false,ending:false,ar:new Map(),onFinished:null,onDrop:null});}
+async function liveConnect(){
+  if(!LIVE.on||!REC.stream)return;
+  let cfg;try{cfg=await api('/api/live/start',{});}catch(e){LIVE.broken=true;return;}
+  if(!LIVE.on||LIVE.ending)return;
+  let ws;try{ws=new WebSocket(cfg.url,['soniox-api-key',cfg.key]);}catch(e){LIVE.broken=true;return;}
+  LIVE.ws=ws;
+  ws.onopen=()=>{ws.send(JSON.stringify(cfg.config));
+    const mime=pickMime();let mr;try{mr=new MediaRecorder(REC.stream,mime?{mimeType:mime,audioBitsPerSecond:48000}:{});}catch(e){LIVE.broken=true;return;}
+    mr.ondataavailable=e=>{if(e.data&&e.data.size&&ws.readyState===1)ws.send(e.data);};
+    LIVE.mr=mr;mr.start(250);if(ST.solo.paused)try{mr.pause();}catch(e){}
+    clearInterval(LIVE.ka);LIVE.ka=setInterval(()=>{if(ws.readyState===1&&ST.solo.paused)ws.send('{"type":"keepalive"}');},15000);};
+  ws.onmessage=e=>{let d;try{d=JSON.parse(e.data);}catch(x){return;}
+    if(d.error_code||d.error_type){LIVE.broken=true;console.warn('live text:',d.error_type,d.error_message);return;}
+    const pend=[];
+    for(const t of d.tokens||[]){if(!t.text||/^<[a-z_]+>$/i.test(t.text))continue;
+      if(t.is_final){if(LIVE.off&&t.start_ms!=null){t.start_ms+=LIVE.off;t.end_ms+=LIVE.off;}LIVE.fin.push(t);liveAdd(t,LIVE);}else pend.push(t);}
+    LIVE.pend=pend;liveSoon();
+    if(d.finished&&LIVE.onFinished)LIVE.onFinished();};
+  ws.onclose=()=>{clearInterval(LIVE.ka);if(LIVE.ws!==ws)return;LIVE.ws=null;try{if(LIVE.mr&&LIVE.mr.state!=='inactive')LIVE.mr.stop();}catch(e){}LIVE.mr=null;LIVE.pend=[];
+    if(LIVE.onDrop){LIVE.onDrop();return;}
+    // The line dropped mid-recording: carry on with a new stream. The final transcript is then made from the saved recording.
+    if(LIVE.on&&!LIVE.ending){LIVE.broken=true;LIVE.off=(ST.solo.t||0)*1000;clearTimeout(LIVE.rt);LIVE.rt=setTimeout(liveConnect,2000);}};
 }
-function liveAr(row){if(row.ar||!row.en||row._ar)return;row._ar=true;api('/api/translate',{target:'ar',items:[row.en]}).then(j=>{row.ar=(j.items||[])[0]||'';liveRender();}).catch(()=>{row._ar=false;});}
-const liveRows=()=>(ST.solo.live||[]).slice().sort((a,b)=>a.i-b.i);
-const liveTextOf=row=>{const s=ST.solo;return !s.ltr?row.orig:s.ltarget==='ar'?(row.ar||row.en):row.en;};
-// Text is shown as paragraphs of about four sentences.
-function liveParas(){const out=[];let cur='',n=0;
-  for(const r of liveRows()){if(r.state!=='done')continue;const t=liveTextOf(r);if(!t)continue;cur+=(cur?' ':'')+t;n+=(t.match(/[.?!؟।。]+(\s|$)/g)||[]).length||1;if(n>=4){out.push(cur);cur='';n=0;}}
-  if(cur)out.push(cur);return out;}
+function liveGo(){if(!HEALTH||!HEALTH.engine||LIVE.on)return;LIVE.on=true;liveConnect();}
+// Ends the stream and waits for the last words. Gives back the words for the final transcript,
+// or nothing if the stream was not complete (the saved recording is transcribed instead).
+function liveFinish(){
+  return new Promise(res=>{
+    const ws=LIVE.ws,mr=LIVE.mr;LIVE.ending=true;clearTimeout(LIVE.rt);
+    if(!ws||ws.readyState!==1||LIVE.broken)return res(null);
+    let done=false;const fin=ok=>{if(done)return;done=true;clearTimeout(to);LIVE.onFinished=LIVE.onDrop=null;res(ok&&!LIVE.broken&&LIVE.fin.length?LIVE.fin.slice():null);};
+    const to=setTimeout(()=>fin(false),15000);LIVE.onFinished=()=>fin(true);LIVE.onDrop=()=>fin(false);
+    const end=()=>setTimeout(()=>{try{ws.send('');}catch(e){fin(false);}},200);
+    if(mr&&mr.state!=='inactive'){mr.addEventListener('stop',end,{once:true});try{mr.stop();}catch(e){end();}}else end();
+  });
+}
+function liveEnd(){LIVE.on=false;clearTimeout(LIVE.rt);clearInterval(LIVE.ka);const ws=LIVE.ws;LIVE.ws=null;try{if(LIVE.mr&&LIVE.mr.state!=='inactive')LIVE.mr.stop();}catch(e){}LIVE.mr=null;try{ws&&ws.close();}catch(e){}
+  LIVE.pend=[];cancelAnimationFrame(LIVE.raf);try{LIVE.ctx&&LIVE.ctx.close();}catch(e){}LIVE.ctx=null;LIVE.level=0;}
+function liveSoon(){if(LIVE.tmr)return;LIVE.tmr=setTimeout(()=>{LIVE.tmr=0;liveRender();},250);}
+const liveView=()=>{const s=ST.solo;return !s.ltr?'orig':s.ltarget==='ar'?'ar':'en';};
+// Text is shown as paragraphs of four sentences.
+const SENT=/[^.?!؟।。]+(?:[.?!؟।。]+["”’)]*\s*|$)/g;
+function parasOf(text){const ss=(String(text||'').match(SENT)||[]).filter(x=>x.trim()),out=[];for(let i=0;i<ss.length;i+=4)out.push(ss.slice(i,i+4).join('').trim());return out;}
+function liveParas(){
+  const v=liveView();let ps=parasOf(v==='orig'?LIVE.orig:LIVE.en);
+  if(v==='ar')ps=ps.map((p,i)=>{if(i===ps.length-1&&LIVE.on)return p;const c=LIVE.ar.get(p);
+    if(c==null){LIVE.ar.set(p,'');api('/api/translate',{target:'ar',items:[p]}).then(j=>{LIVE.ar.set(p,(j.items||[])[0]||p);liveSoon();}).catch(()=>LIVE.ar.delete(p));return p;}
+    return c||p;});
+  return ps;
+}
 function liveBody(){
-  const s=ST.solo,ps=liveParas(),wait=liveRows().some(r=>r.state==='wait'),rec=s.phase==='meet'&&isListen();
-  if(!ps.length&&!wait)return `<div class="lvempty">${rec?`<b>Listening…</b><span>${HEALTH&&HEALTH.engine?'The first text appears in about 15 seconds.':'Recording. The text is written when you stop.'}</span>`:`<b>Press record.</b><span>New text appears here every 10 seconds, as paragraphs.</span>`}</div>`;
-  return ps.map((t,i)=>`<p dir="auto" class="${i===ps.length-1?'new':''}">${esc(t)}</p>`).join('')+(wait?`<div class="lvdots"><i></i><i></i><i></i></div>`:'');
+  const s=ST.solo,ps=liveParas(),o={orig:'',en:''},rec=s.phase==='meet'&&isListen();LIVE.pend.forEach(t=>liveAdd(t,o));
+  const pend=(liveView()==='orig'?o.orig:o.en).trim();
+  if(!ps.length&&!pend)return `<div class="lvempty">${rec?`<b>Listening…</b><span>${HEALTH&&HEALTH.engine?(LIVE.broken&&!LIVE.ws?'Live text is not available right now. The recording continues and is transcribed when you stop.':'Words appear here as they are spoken.'):'Recording. The text is written when you stop.'}</span>`:`<b>Press record.</b><span>The words appear here as they are spoken, in paragraphs.</span>`}</div>`;
+  return ps.map((t,i)=>`<p dir="auto" class="${i===ps.length-1?'new':''}">${esc(t)}${i===ps.length-1&&pend?` <span class="pend">${esc(pend)}</span>`:''}</p>`).join('')+(!ps.length&&pend?`<p dir="auto" class="new"><span class="pend">${esc(pend)}</span></p>`:'');
 }
-function liveSide(){const s=ST.solo,v=$('#lvVoices');if(!v)return;const n=s.voices||0;
+function liveSide(){const s=ST.solo,v=$('#lvVoices');if(!v)return;const n=LIVE.spk.size;
   v.innerHTML=n?`<span class="lvd">${Array.from({length:Math.min(n,4)},(_,k)=>`<i style="--c:${C[k]}"></i>`).join('')}</span><b>${n}</b><small>${n===1?'voice':'voices'}</small>`:`<small>${isListen()&&s.phase==='meet'?'Listening':'No voices yet'}</small>`;}
 function liveRender(){const b=$('#lvText');if(!b)return;const stick=b.scrollHeight-b.scrollTop-b.clientHeight<90;b.innerHTML=liveBody();if(stick)b.scrollTop=b.scrollHeight;liveSide();}
 setInterval(()=>{const m=$('#lvMeter');if(!m)return;const s=ST.solo,on=isListen()&&s.phase==='meet'&&!s.paused,n=on?Math.round(Math.min(1,Math.sqrt(LIVE.level)*2.4)*LSEG):0;
@@ -1005,23 +1045,24 @@ const ACT={
    const b=$('#sPause');if(b)b.innerHTML=s.paused?I('play','s')+'Resume':I('pause','s')+'Pause';
    const r=$('#sRec');if(r){r.classList.toggle('paused',s.paused);r.querySelector('b').textContent=s.paused?'PAUSED':'REC';}
    if(LIS.pip){const d=LIS.pip.document;d.getElementById('pP').textContent=s.paused?'Resume':'Pause';d.getElementById('pD').classList.toggle('pz',s.paused);}
-   if(isListen()){s.paused?liveHalt():liveGo();render();}
+   if(isListen()){try{if(LIVE.mr)s.paused?LIVE.mr.pause():LIVE.mr.resume();}catch(e){}render();}
    syncSolo();},
  'solo-end'(){if(isListen())return sheet(`<h3>Stop listening?</h3><p>Recording stops. The audio is sent once and the notes are written.</p><div class="stk"><button class="btnr" data-act="solo-end-ok">Stop and write notes</button><button class="btng" data-act="close">Keep listening</button></div>`);
    sheet(`<h3>End this meeting?</h3><p>Recording stops. The audio is sent once, transcribed, and each voice is named from the introductions.</p><div class="stk"><button class="btnr" data-act="solo-end-ok">End meeting</button><button class="btng" data-act="close">Keep recording</button></div>`);},
  async 'solo-end-ok'(){closeSheet();const s=ST.solo;if(!(s.phase==='intro'||s.phase==='meet'))return;if(s.phase==='intro')s.introEndMs=s.t*1000;s.paused=false;
-   s.micFlags=isListen()?LIS.flags.slice():null;if(isListen())liveEnd();
+   const L=isListen();s.micFlags=L?LIS.flags.slice():null;
    const mid=REC.mid;s.phase='proc';s.step='save';render();
+   const words=L?await liveFinish():null;if(L)liveEnd();
    await recStop();await DB.patch(mid,{state:'ended',durationSec:s.t,introEndMs:s.introEndMs}).catch(()=>{});
-   processMeeting(mid);},
+   processMeeting(mid,null,words);},
  'sign-in-again'(){showLogin('Sign in, then send the recording from the Solo tab.');},
  'solo-retry'(){const s=ST.solo;processMeeting(s.mid,s.mid?null:s.blob);},
  'solo-file'(){FILE_MODE='solo';$('#fileIn').click();},
  'listen-file'(){FILE_MODE='listen';$('#fileIn').click();},
  'lv-kind'(){const s=ST.solo;s.lkind=s.lkind==='call'?'video':'call';render();toast(s.lkind==='call'?'Call or meeting: you get minutes':'Video or lecture: you get learning notes');},
  'lv-mini'(){ST.solo.mini=!ST.solo.mini;render();},
- 'lv-tr'(){const s=ST.solo;s.ltr=!s.ltr;if(s.ltr&&s.ltarget==='ar')s.live.forEach(liveAr);render();},
- 'lv-lang'(){const s=ST.solo;s.ltarget=s.ltarget==='ar'?'en':'ar';s.ltr=true;if(s.ltarget==='ar')s.live.forEach(liveAr);render();toast('Showing the text in '+(s.ltarget==='ar'?'Arabic':'English'));},
+ 'lv-tr'(){const s=ST.solo;s.ltr=!s.ltr;render();},
+ 'lv-lang'(){const s=ST.solo;s.ltarget=s.ltarget==='ar'?'en':'ar';s.ltr=true;render();toast('Showing the text in '+(s.ltarget==='ar'?'Arabic':'English'));},
  async 'lv-copy'(){const t=liveAllText();if(!t)return toast('Nothing to copy yet');try{await navigator.clipboard.writeText(t);toast('Text copied');}catch(e){toast('Could not copy on this browser');}},
  'lv-txt'(){const t=liveAllText();if(!t)return toast('Nothing to save yet');saveAudio(new Blob([t+'\n'],{type:'text/plain;charset=utf-8'}),'ForgeHype_Listen_'+new Date().toISOString().slice(0,10)+'.txt');},
  'lv-doc'(){const ps=liveParas();if(!ps.length)return toast('Nothing to save yet');
@@ -1030,7 +1071,7 @@ const ACT={
  'lv-link'(){sheet(`<h3>Watch a YouTube video here</h3><p>In YouTube tap Share, copy the link and paste it. The video plays at the top of this page while the text is written below it.</p><div class="stk"><label class="fld"><span>Video link</span><input id="lisUrl" value="${esc(ST.solo.lurl||'')}" placeholder="https://youtu.be/…" inputmode="url" autocomplete="off" autocapitalize="none"></label><button class="btnk" data-act="lv-link-ok">Use this video</button>${ytId(ST.solo.lurl)?'<button class="btng" data-act="lv-link-no">Remove the video</button>':''}<button class="btng" data-act="close">Cancel</button></div>`);},
  'lv-link-ok'(){const s=ST.solo;if(!ytId(s.lurl))return toast('That is not a YouTube video link');closeSheet();render();},
  'lv-link-no'(){ST.solo.lurl='';closeSheet();render();},
- 'lv-help'(){sheet(`<h3>How Listen works</h3><div class="helpsc"><ol class="steps"><li>Press the round button to start. On a phone, allow the microphone. On a computer, pick the tab that is playing and keep “Also share tab audio” on.</li><li>The bars on the left show the volume being captured. If they stay empty, nothing is being heard.</li><li>About every 10 seconds, new text is added to the card. After four or five sentences it becomes a paragraph.</li><li>Switch on the EN toggle to see the text in English. “To Arabic” changes the language.</li><li>The number on the right is how many different voices were heard.</li><li>Copy, TXT and Word save the text you see.</li><li>Press the button again to stop. The whole recording is then transcribed once more in full quality, and you can create the notes.</li></ol>
+ 'lv-help'(){sheet(`<h3>How Listen works</h3><div class="helpsc"><ol class="steps"><li>Press the round button to start. On a phone, allow the microphone. On a computer, pick the tab that is playing and keep “Also share tab audio” on.</li><li>The bars on the left show the volume being captured. If they stay empty, nothing is being heard.</li><li>The words appear in the card as they are spoken. Grey words are still being worked out. Every four sentences become a paragraph.</li><li>Switch on the EN toggle to see the text in English. “To Arabic” changes the language.</li><li>The number on the right is how many different voices were heard.</li><li>Copy, TXT and Word save the text you see.</li><li>Press the button again to stop. The transcript opens for checking, and you can create the notes.</li></ol>
    <p><b>On a phone.</b> Tap “YouTube link” to play the video inside this page. Keep the sound on the loudspeaker and stay on this page, because the phone stops the recording if you leave.</p>
    <p><b>Small view.</b> The corner button shrinks Listen to the bottom third of the screen, with the video filling the rest.</p>
    <p><b>Calls.</b> Tell people they are being recorded before you start.</p></div><div class="stk"><button class="btnk" data-act="close">Got it</button></div>`);},
@@ -1052,7 +1093,7 @@ const ACT={
      if(e.name==='NotAllowedError'&&!e.noSound)return toast('Nothing was shared, so Listen did not start');
      sheet(e.noSound?`<h3>No sound was shared</h3><p>In the browser's share window, pick the <b>tab</b> that is playing and keep <b>Also share tab audio</b> switched on. A single app window cannot share its sound. On Windows, <b>Entire screen</b> with <b>Also share system audio</b> works for any program.</p><div class="stk"><button class="btnk" data-act="listen-go">Try again</button><button class="btng" data-act="close">Cancel</button></div>`
        :`<h3>Listen could not start</h3><p>${esc(e.message||String(e))}</p><div class="stk"><button class="btnk" data-act="close">OK</button></div>`);return;}
-   Object.assign(s,{phase:'meet',t:0,paused:false,introEndMs:0,announceEndMs:0,startedAt:Date.now(),speakers:[],result:null,blob:null,rid:null,mid:REC.mid,pending:null,micFlags:null,live:[],voices:0});LIVE.idx=0;
+   Object.assign(s,{phase:'meet',t:0,paused:false,introEndMs:0,announceEndMs:0,startedAt:Date.now(),speakers:[],result:null,blob:null,rid:null,mid:REC.mid,pending:null,micFlags:null});liveReset();
    render();window.scrollTo(0,0);liveGo();listenPip(true);
  },
  'solo-save-audio'(){saveAudio(ST.solo.blob,audioName());},

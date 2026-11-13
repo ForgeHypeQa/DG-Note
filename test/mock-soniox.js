@@ -99,4 +99,21 @@ app.get('/v1/transcriptions/:id/transcript', (req, res) => {
 app.delete('/v1/transcriptions/:id', (req, res) => { trs.delete(req.params.id); console.log('[mock] deleted transcription'); res.status(204).end(); });
 app.delete('/v1/files/:id', (req, res) => { files.delete(req.params.id); console.log('[mock] deleted file'); res.status(204).end(); });
 
-app.listen(PORT, () => console.log(`Mock Soniox on http://localhost:${PORT}/v1`));
+app.post('/v1/auth/temporary-api-key', express.json(), (req, res) => res.status(201).json({ api_key: 'snx_temp_mock', expires_at: new Date(Date.now() + 60000).toISOString() }));
+const srv = app.listen(PORT, () => console.log(`Mock Soniox on http://localhost:${PORT}/v1`));
+// Stand-in for the real-time stream: after the config message it sends the scripted words a few at a
+// time, first as provisional and then as final; an empty text frame ends the stream.
+const { WebSocketServer } = await import('ws');
+new WebSocketServer({ server: srv, path: '/rt', handleProtocols: p => (p.has('soniox-api-key') ? 'soniox-api-key' : false) }).on('connection', ws => {
+  const all = tokens(); let i = 0, started = false, bytes = 0, iv;
+  const step = n => { const fin = all.slice(i, i + n).map(t => ({ ...t, is_final: true })); i += fin.length;
+    const pend = all.slice(i, i + 3).filter(t => t.translation_status !== 'translation').map(t => ({ ...t, is_final: false }));
+    if (ws.readyState === 1) ws.send(JSON.stringify({ tokens: [...fin, ...pend], final_audio_proc_ms: fin.at(-1)?.end_ms || 0, total_audio_proc_ms: 0 })); };
+  ws.on('message', (data, isBinary) => {
+    if (isBinary) { bytes += data.length; return; }
+    const txt = data.toString();
+    if (!started) { started = true; console.log('[mock rt] config', JSON.parse(txt).model); iv = setInterval(() => { if (bytes > 0 && i < all.length) step(8); }, 300); return; }
+    if (txt === '') { clearInterval(iv); step(all.length); ws.send(JSON.stringify({ tokens: [], finished: true })); ws.close(); console.log('[mock rt] finished, audio bytes', bytes); }
+  });
+  ws.on('close', () => clearInterval(iv));
+});
