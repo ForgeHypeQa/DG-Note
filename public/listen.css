@@ -116,7 +116,7 @@ body:has(.lis-mini){background:#000}
 .ytc #ytP{background:#fff;color:var(--ink);min-width:92px;justify-content:center}
 .helpsc{max-height:52vh;overflow-y:auto;margin-top:12px;padding-right:4px}.helpsc p{font-size:14.5px}
 
-.lvtext .pend{color:#A9A5A4}
+.lvtext .lvpend{color:#A9A5A4}
 
 /* second language picker */
 .lseg .car{font-style:normal;font-size:9px;margin-left:3px;opacity:.7}
@@ -144,3 +144,23 @@ body:has(.lis-mini){background:#000}
 .lseg.sm{background:color-mix(in srgb,var(--fg) 7%,transparent);padding:3px}
 .lseg.sm button{font-size:12.5px;padding:0 12px;min-width:0;color:var(--fg2);letter-spacing:0}
 .lseg.sm button.on{background:var(--fg);color:var(--cardbg,#fff)}
+
+/* Listen: more room for the text (phone with a video on top) */
+.lis-rec .hrow{display:none}.lis-rec .tabs{margin-top:0}.lis-rec .hdr{padding:10px 14px 8px}
+.lv{gap:8px;padding:8px 8px calc(10px + env(safe-area-inset-bottom))}
+.lvcard{min-height:150px;border-radius:26px}
+.lvh{padding:12px 12px 6px 18px}
+.lvt{overflow:hidden}.lvt b{overflow:hidden;text-overflow:ellipsis}
+.lv.rec .lvt b{font-size:18px}
+.lvtext{padding:4px 18px 14px}
+.lvbar{height:62px;margin-top:4px;padding:0 18px}
+.lrec{width:58px;height:58px;transform:translateY(-8px)}.lrec:active{transform:translateY(-8px) scale(.94)}.lrec svg{width:23px;height:23px}
+.lmeter i{height:22px}
+.lvoices b{font-size:19px}
+.lchip{padding:8px 12px}
+#lisPlayer iframe{max-height:27dvh}
+.ytc{padding:6px 10px;gap:8px}.ytc button{padding:6px 13px}
+.app.lis-mini{height:40dvh}
+.lis-mini #lisPlayer{height:60dvh}.lis-mini #lisPlayer iframe{max-height:none}
+.lv.mini .lvcard{min-height:0}
+.lv.mini .lvbar{height:52px;margin-top:2px}.lv.mini .lrec{width:48px;height:48px;transform:translateY(-5px)}

@@ -597,7 +597,7 @@ function liveBody(){
   const s=ST.solo,ps=liveParas(),o={orig:'',en:''},rec=s.phase==='meet'&&isListen();LIVE.pend.forEach(t=>liveAdd(t,o));
   const pend=(liveView()==='orig'?o.orig:o.en).trim();
   if(!ps.length&&!pend)return `<div class="lvempty">${rec?`<b>Listening…</b><span>${HEALTH&&HEALTH.engine?(LIVE.broken&&!LIVE.ws?'Live text is not available right now. The recording continues and is transcribed when you stop.':'Words appear here as they are spoken.'):'Recording. The text is written when you stop.'}</span>`:`<b>Press record.</b><span>The words appear here as they are spoken, in paragraphs.</span>`}</div>`;
-  return ps.map((t,i)=>`<p dir="auto" class="${i===ps.length-1?'new':''}">${esc(t)}${i===ps.length-1&&pend?` <span class="pend">${esc(pend)}</span>`:''}</p>`).join('')+(!ps.length&&pend?`<p dir="auto" class="new"><span class="pend">${esc(pend)}</span></p>`:'');
+  return ps.map((t,i)=>`<p dir="auto" class="${i===ps.length-1?'new':''}">${esc(t)}${i===ps.length-1&&pend?` <span class="lvpend">${esc(pend)}</span>`:''}</p>`).join('')+(!ps.length&&pend?`<p dir="auto" class="new"><span class="lvpend">${esc(pend)}</span></p>`:'');
 }
 function liveSide(){const s=ST.solo,v=$('#lvVoices');if(!v)return;const n=LIVE.spk.size;
   v.innerHTML=n?`<span class="lvd">${Array.from({length:Math.min(n,4)},(_,k)=>`<i style="--c:${C[k]}"></i>`).join('')}</span><b>${n}</b><small>${n===1?'voice':'voices'}</small>`:`<small>${isListen()&&s.phase==='meet'?'Listening':'No voices yet'}</small>`;}
@@ -1072,7 +1072,7 @@ function stopPlay(){if(ST.rep.play){clearInterval(ST.rep.play);ST.rep.play=null;
 function render(){
   const cr=ST.rep&&ST.rep.id&&ST.reports.find(r=>r.id===ST.rep.id);if(cr&&cr.real)saveReport(cr);
   const app=$('#app'); const lf=ST.tab==='listen'&&(ST.solo.phase==='idle'||(isListen()&&ST.solo.phase==='meet'));
-  app.className='app '+(ST.tab==='solo'||ST.tab==='listen'?'t-dark':'t-mix')+(lf?' lis-fixed'+(ST.solo.mini?' lis-mini':''):'');
+  app.className='app '+(ST.tab==='solo'||ST.tab==='listen'?'t-dark':'t-mix')+(lf?' lis-fixed'+(ST.solo.mini?' lis-mini':'')+(ST.solo.phase==='meet'||(!canListen()&&ytId(ST.solo.lurl))?' lis-rec':''):'');
   $$('.tabs button').forEach(b=>{const on=b.dataset.tab===ST.tab;b.classList.toggle('on',on);b.setAttribute('aria-selected',on);});
   const d=ST.reports.filter(r=>r.status==='draft').length, bd=$('#repBadge'); bd.textContent=d; bd.classList.toggle('on',d>0&&ST.tab!=='reports');
   stopPlay();
