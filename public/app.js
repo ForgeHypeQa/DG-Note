@@ -109,9 +109,56 @@ const curRep=()=>ST.reports.find(r=>r.id===ST.rep.id);
 
 /* ================= shared pieces ================= */
 function capsheet(cap,sheet){return `<div class="capwrap"><div class="cap">${cap}</div></div><div class="sheetwrap"><div class="sheet">${sheet}</div></div>`;}
+/* ---------- Read aloud: the phone's own voice reads a section, or the whole report ---------- */
+const RD={on:false,paused:false,sec:null,q:[],i:0,rid:null,view:null,spoke:false};
+const READABLE=id=>/^r-(top|dec|act|qs|tx|x-)/.test(id)&&ST.tab==='reports'&&!!curRep()?.real;
+const readBtn=(sec,cls)=>{const on=RD.on&&RD.sec===sec&&!RD.paused;return `<button class="rdb ${cls||''} ${RD.on&&RD.sec===sec?'on':''}" data-act="read" data-sec="${sec}" aria-label="${on?'Pause reading':sec==='all'?'Read the whole report aloud':'Read this section aloud'}">${I(on?'pause':'play','s')}</button>`;};
+const VPRE={fil:['fil','tl'],id:['id','in'],zh:['zh','cmn','yue'],ms:['ms'],ne:['ne'],si:['si']};
+let VOICES=[];
+const loadVoices=()=>{try{VOICES=speechSynthesis.getVoices()||[];}catch(e){VOICES=[];}return VOICES;};
+try{loadVoices();speechSynthesis.addEventListener('voiceschanged',loadVoices);}catch(e){}
+const voiceFor=c=>{const pre=VPRE[c]||[c];return VOICES.find(v=>pre.some(p=>{const l=(v.lang||'').toLowerCase().replace('_','-');return l===p||l.startsWith(p+'-');}));};
+// In the as-spoken view each line is read in the language it is written in.
+const scriptLang=t=>/[ঀ-৿]/.test(t)?'bn':/[؀-ۿ]/.test(t)?'ar':/[ऀ-ॿ]/.test(t)?'hi':/[஀-௿]/.test(t)?'ta':/[ഀ-ൿ]/.test(t)?'ml':/[඀-෿]/.test(t)?'si':/[฀-๿]/.test(t)?'th':/[぀-ヿ]/.test(t)?'ja':/[가-힯]/.test(t)?'ko':/[一-鿿]/.test(t)?'zh':'en';
+function readPieces(sec){
+  const clean=el=>(el?el.textContent:'').replace(/\s+/g,' ').trim(),out=[];
+  const from=root=>{if(!root)return;root.querySelectorAll('li, .act, p.xtext, .txl').forEach(el=>{
+    if(el.matches('.txl')){const t=clean(el.querySelector('.tt'));if(t)out.push(clean(el.querySelector('.sp'))+'. '+t);}
+    else if(el.matches('.act')){const t=[...el.children].filter(c=>!c.classList.contains('am')).map(clean).filter(Boolean).join('. '),o=clean(el.querySelector('.am .sp'));if(t)out.push(t+(o?'. '+o:''));}
+    else{const t=clean(el);if(t)out.push(t);}});};
+  if(sec==='sum'||sec==='all'){const u=$('#view .sum');if(u)u.querySelectorAll('li').forEach(li=>{const t=clean(li);if(t)out.push(t);});}
+  if(sec==='all')$$('#view .dr').forEach(d=>{const id=d.dataset.dr;if(READABLE(id)&&id!=='r-tx'){const h=clean(d.querySelector('.drt')),n=out.length;from(d.querySelector('.drpad'));if(out.length>n)out.splice(n,0,h);}});
+  else if(sec!=='sum')from($(`#view .dr[data-dr="${sec}"] .drpad`));
+  return out;
+}
+function readSync(){$$('.rdb').forEach(b=>{const mine=RD.on&&RD.sec===b.dataset.sec,playing=mine&&!RD.paused;b.classList.toggle('on',mine);b.innerHTML=I(playing?'pause':'play','s');b.setAttribute('aria-label',playing?'Pause reading':b.dataset.sec==='all'?'Read the whole report aloud':'Read this section aloud');});}
+function readStop(){if(!RD.on)return;RD.on=false;RD.paused=false;RD.sec=null;try{speechSynthesis.cancel();}catch(e){}readSync();}
+function readNoVoice(code){readStop();const n=langOf(code)[2];sheet(`<h3>${esc(n)} cannot be read aloud here</h3><p>This phone has no voice for ${esc(n)}. Upgrading to a higher plan will support your language.</p><div class="stk"><button class="btnk" data-act="close">OK</button></div>`);}
+function readNext(){
+  if(!RD.on||RD.paused)return;
+  while(RD.i<RD.q.length){
+    const text=RD.q[RD.i],code=RD.view==='orig'?scriptLang(text):RD.view,v=voiceFor(code);
+    if(!v&&VOICES.length){if(RD.view!=='orig')return readNoVoice(code);RD.i++;continue;}   // as spoken: skip lines this phone cannot read
+    const u=new SpeechSynthesisUtterance(text),tok=RD.tok;if(v){u.voice=v;u.lang=v.lang;}else u.lang=(VPRE[code]||[code])[0];
+    u.onend=()=>{if(RD.tok!==tok||!RD.on||RD.paused)return;RD.spoke=true;RD.i++;readNext();};
+    u.onerror=e=>{if(RD.tok!==tok||!RD.on||RD.paused||e.error==='canceled'||e.error==='interrupted')return;if(RD.view!=='orig'&&!RD.spoke)return readNoVoice(code);RD.i++;readNext();};
+    try{speechSynthesis.speak(u);}catch(e){return readNoVoice(code);}
+    return;
+  }
+  const none=!RD.spoke&&RD.view==='orig'&&RD.q.length;readStop();if(none)readNoVoice(scriptLang(RD.q[0]));
+}
+async function readToggle(sec){
+  if(!('speechSynthesis' in window))return toast('This browser cannot read aloud');
+  if(RD.on&&RD.sec===sec){RD.paused=!RD.paused;RD.tok=Math.random();try{speechSynthesis.cancel();}catch(e){}readSync();if(!RD.paused)setTimeout(readNext,120);return;}   // pause keeps the place; play carries on from it
+  readStop();const q=readPieces(sec);if(!q.length)return toast('Nothing to read in this section yet');
+  if(!loadVoices().length)await new Promise(r=>setTimeout(r,700)),loadVoices();
+  Object.assign(RD,{on:true,paused:false,sec,q,i:0,rid:curRep()?.id,view:ST.rep.lang,spoke:false,tok:Math.random()});
+  $$('.aud').forEach(a=>a.pause());readSync();readNext();
+}
 function drawer(id,title,count,body,defOpen,preview){
   const open=ST.open[id]!==undefined?ST.open[id]:!!defOpen;
-  return `<section class="dr ${open?'open':''}" data-dr="${id}"><button class="drh" aria-expanded="${open}"><span class="drt">${title}</span><span class="drc" id="drc-${id}">${count===0||count?count:''}</span><span class="drp" id="drp-${id}">${preview||''}</span>${I('chev','chev')}</button><div class="drb"><div class="dri"><div class="drpad">${body}</div></div></div></section>`;
+  const rd=READABLE(id);
+  return `<section class="dr ${open?'open':''}" data-dr="${id}"><button class="drh" aria-expanded="${open}"><span class="drt">${title}</span><span class="drc" id="drc-${id}">${count===0||count?count:''}</span><span class="drp" id="drp-${id}">${preview||''}</span>${rd?'<span class="rdsp"></span>':''}${I('chev','chev')}</button>${rd?readBtn(id):''}<div class="drb"><div class="dri"><div class="drpad">${body}</div></div></div></section>`;
 }
 function toast(html){const t=document.createElement('div');t.className='toast';t.innerHTML=html;const box=$('#toasts');while(box.children.length>1)box.firstChild.remove();box.appendChild(t);setTimeout(()=>t.remove(),3200);}
 function sheet(html){$('#bsheet').innerHTML='<div class="grab"></div>'+html;$('#bsheet').classList.add('on');$('#scrim').classList.add('on');}
@@ -906,7 +953,7 @@ function showSpeaker(r,ms,playing){
 }
 for(const ev of ['timeupdate','play','pause','seeked'])document.addEventListener(ev,e=>{
   const a=e.target;if(!a.classList||!a.classList.contains('aud'))return;const r=curRep();if(!r||!r.result)return;
-  if(ev==='play')$$('.aud').forEach(x=>{if(x!==a)x.pause();});
+  if(ev==='play'){$$('.aud').forEach(x=>{if(x!==a)x.pause();});readStop();}
   let off=0;for(const x of $$('.aud')){if(x===a)break;off+=isFinite(x.duration)?x.duration:0;}
   showSpeaker(r,(off+a.currentTime)*1000,!a.paused&&!a.ended);
 },true);
@@ -943,13 +990,13 @@ function repDetail(r){
       <h1 class="mt">${esc(r.title)}</h1><div class="writing"><span class="gdots"><i></i><i></i><i></i></span>Translating the report into ${l2[2]}…</div>`,
     `<p class="fine">The report comes first, in a few seconds. The transcript follows. Tap EN to go back.</p>`);
   const cap=`<div class="bar"><button class="back" data-act="rep-back">${I('back')}Reports</button><span class="grow"></span>
-      ${r.real?`<span class="lseg" role="group" aria-label="Language">${`<button class="${lang==='en'?'on':''}" data-act="rep-l" data-l="en" aria-label="English">EN</button><button class="${isL2?'on':''}" data-act="rep-l2" aria-label="Second language: ${l2[2]}. Tap to choose">${l2[1]}<i class="car">▾</i></button><button class="${lang==='orig'?'on':''}" data-act="rep-l" data-l="orig" aria-label="As spoken">Orig</button>`}</span>`
+      ${r.real&&mins==='done'?readBtn('all','top'):''}${r.real?`<span class="lseg" role="group" aria-label="Language">${`<button class="${lang==='en'?'on':''}" data-act="rep-l" data-l="en" aria-label="English">EN</button><button class="${isL2?'on':''}" data-act="rep-l2" aria-label="Second language: ${l2[2]}. Tap to choose">${l2[1]}<i class="car">▾</i></button><button class="${lang==='orig'?'on':''}" data-act="rep-l" data-l="orig" aria-label="As spoken">Orig</button>`}</span>`
         :Object.keys(r.tr).length?`<button class="pillb" data-act="rep-lang">${I('globe','s')}${LANG[lang].name}</button>`:''}
       ${r.status==='draft'&&lang==='en'?`<button class="pillb ${ed?'on':''}" data-act="rep-edit">${ed?'Done':'Edit'}</button>`:''}</div>
     <div class="kind">${I(KIND_ICON[r.kind]||'people','s')}<span>${KIND_NAME[r.kind]||'Group'} · ${r.people.length} people</span>${repStatus(r)}</div>
     <h1 class="mt">${esc(r.title)}</h1>
     <p class="meta">${r.when} · ${r.time} · ${r.dur}<br>Called by ${esc(r.by)}</p>
-    ${!lay||lay.some(e=>e.field==='summary')?`<div class="sumh">${esc(T('summary',L.sum))}</div>`:''}
+    ${!lay||lay.some(e=>e.field==='summary')?`<div class="sumh">${esc(T('summary',L.sum))}${r.real&&mins==='done'?readBtn('sum','inl'):''}</div>`:''}
     ${mins==='working'?`<div class="writing"><span class="gdots"><i></i><i></i><i></i></span>Writing the meeting report…</div>`
       :mins!=='done'?`<p class="sub" style="max-width:none">${mins==='error'?esc(r.minutesErr||'The report could not be written.'):'The transcript is ready. Check it below, then create the meeting report.'}</p><button class="cta" style="margin-top:14px" data-act="rep-minutes">${mins==='error'?'Try again':'Create the meeting report'}</button><button class="tplline" data-act="tpl-choose">Template: <b>${esc(tplById(r.templateId||getDefaultTplId()).name)}</b> · change</button>`:''}
     <ul class="sum ${rtl?'rtl':''} ${ST.rep.shim?'shim':''}" ${rtl?'lang="ar"':''}>${r.sum.map((s,i)=>`<li><span ${E('s'+i,'sum')}>${txt('s'+i,s,tr&&tr.sum[i])}</span></li>`).join('')}${added('sum')}</ul>
@@ -1020,6 +1067,7 @@ function render(){
   $('#view').innerHTML = ST.tab==='solo'?viewSolo():ST.tab==='listen'?viewListen():ST.tab==='group'?viewGroup():viewReports();
   if(ST.tab==='solo'||ST.tab==='listen') syncSolo();
   syncPlayer();
+  if(RD.on&&(ST.tab!=='reports'||curRep()?.id!==RD.rid||ST.rep.lang!==RD.view))readStop();
   if(lf){liveSide();const b=$('#lvText');if(b)b.scrollTop=b.scrollHeight;}
   if(ST.tab==='group') syncGroup();
   ST.rep.shim=false;
@@ -1134,6 +1182,7 @@ const ACT={
  'solo-open'(){const s=ST.solo;const r=buildRealReport();ST.reports=[r,...ST.reports.filter(x=>x.id!==r.id)];saveReport(r);
    Object.assign(s,{phase:'idle',t:0,paused:false,introEndMs:0,speakers:[],result:null,title:'',rid:null,err:'',mid:null,parts:null,blob:null});
    openReport(r.id);ST.open['r-tx']=!autoReport();render();window.scrollTo(0,0);if(autoReport())makeMinutes(r);},
+ read(el){readToggle(el.dataset.sec);},
  'rep-seek'(el,e){const a=$('.aud'),b=el.getBoundingClientRect();if(!a||!b.width)return;a.currentTime=Math.max(0,Math.min(1,(e.clientX-b.left)/b.width))*(+el.dataset.tot)/1000;a.play().catch(()=>{});},
  'rep-l'(el){saveAll();const l=el.dataset.l;ST.rep.lang=l;if(l!=='en')ST.rep.edit=false;ST.rep.shim=true;render();},
  'rep-l2'(){saveAll();openLangs('rep',ST.rep.lang!=='en'&&ST.rep.lang!=='orig'?ST.rep.lang:lang2());},

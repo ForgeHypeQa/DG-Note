@@ -122,3 +122,14 @@ body:has(.lis-mini){background:#000}
 .lseg .car{font-style:normal;font-size:9px;margin-left:3px;opacity:.7}
 .helpsc .lrowb{font-size:16px;padding:13px 4px}
 .ltog span{font-size:11px}
+
+/* read aloud: one small play / pause icon */
+.dr{position:relative}
+.rdsp{width:30px;flex:none}
+.rdb{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;flex:none;background:color-mix(in srgb,var(--fg) 8%,transparent);color:var(--fg)}
+.rdb svg{width:15px;height:15px}
+.rdb.on{background:var(--acc);color:#fff}
+.dr>.rdb{position:absolute;top:13px;right:44px}
+.rdb.inl{display:inline-grid;vertical-align:middle;margin-left:10px;width:28px;height:28px;background:rgba(255,255,255,.12);color:#fff}
+.rdb.top{background:rgba(255,255,255,.12);color:#fff;margin-right:8px}
+.rdb.inl.on,.rdb.top.on{background:var(--acc)}
