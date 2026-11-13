@@ -3,15 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>DG-Note · ForgeHype</title>
+<title>Qalm · ForgeHype</title>
 <meta name="theme-color" content="#161414">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="DG-Note">
+<meta name="apple-mobile-web-app-title" content="Qalm">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%228%22 fill=%22%23020102%22/%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%227%22 fill=%22%23FF5D00%22/%3E%3C/svg%3E">
+<link rel="icon" type="image/png" href="/icons/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,300..850&family=Noto+Sans+Arabic:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
@@ -22,14 +22,14 @@
 <div class="app t-dark" id="app" hidden>
   <header class="hdr">
     <div class="hrow">
-      <span class="fh" aria-label="ForgeHype"><span class="f">Forge</span><span class="h">Hype</span></span>
+      <img class="qlogo" src="/icons/qalm-logo.png" alt="Qalm by ForgeHype" width="118" height="46">
       <button class="me" data-act="account" aria-label="Account">··</button>
     </div>
     <nav class="tabs" role="tablist" aria-label="Sections">
       <button role="tab" data-tab="solo" class="on">Solo</button>
-      <button role="tab" data-tab="group">Group</button>
       <button role="tab" data-tab="listen">Listen</button>
-      <button role="tab" data-tab="reports">Reports<span class="tbadge" id="repBadge"></span></button>
+      <button role="tab" data-tab="group">Group</button>
+      <button role="tab" data-tab="reports">Recap<span class="tbadge" id="repBadge"></span></button>
     </nav>
   </header>
   <div id="lisPlayer" hidden></div>

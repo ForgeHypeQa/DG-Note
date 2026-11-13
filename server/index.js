@@ -1,4 +1,4 @@
-// DG-Note server (ForgeHype Meet engine). No database: audio is held in memory only while it is sent
+// Qalm server (Qalm engine). No database: audio is held in memory only while it is sent
 // to the speech engine, and the file and transcription are deleted from the engine once the
 // transcript has been fetched. Results are kept in memory for one hour.
 import 'dotenv/config';
@@ -200,6 +200,6 @@ function friendly(e) {
 }
 
 app.listen(PORT, () => {
-  console.log(`DG-Note running on http://localhost:${PORT}`);
+  console.log(`Qalm running on http://localhost:${PORT}`);
   if (!engine.configured()) console.warn('SONIOX_API_KEY is not set. Copy .env.example to .env and add your key.');
 });

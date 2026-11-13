@@ -133,3 +133,7 @@ body:has(.lis-mini){background:#000}
 .rdb.inl{display:inline-grid;vertical-align:middle;margin-left:10px;width:28px;height:28px;background:rgba(255,255,255,.12);color:#fff}
 .rdb.top{background:rgba(255,255,255,.12);color:#fff;margin-right:8px}
 .rdb.inl.on,.rdb.top.on{background:var(--acc)}
+
+/* Qalm logo */
+.qlogo{display:block;height:46px;width:auto}
+.qlogo.xl{height:90px}

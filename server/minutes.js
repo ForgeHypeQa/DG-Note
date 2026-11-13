@@ -1,11 +1,11 @@
 // Writes meeting minutes from a checked transcript (summary, topics, decisions,
 // action items, open questions), and translates reports and transcripts.
-// Claude (see llm.js). Shown to users only as "ForgeHype Meet".
+// Claude (see llm.js). Shown to users only as "Qalm".
 import * as llm from './llm.js';
 export const configured = llm.configured;
 import { clean, KINDS } from './templates.js';
 
-const RULES = `You are the minute-taker for ForgeHype Meet. You turn a meeting transcript into clear, professional meeting minutes in English.
+const RULES = `You are the minute-taker for Qalm. You turn a meeting transcript into clear, professional meeting minutes in English.
 Rules:
 - Use only what is in the transcript. Never invent facts, names, numbers, dates or decisions.
 - Write in plain, short English sentences. No filler, no opinions.
@@ -74,7 +74,7 @@ export async function writeMinutes(meeting, template) {
 }
 
 /* ---------- a template from an example report ---------- */
-const FROM_EXAMPLE = `You design meeting-report templates for ForgeHype Meet.
+const FROM_EXAMPLE = `You design meeting-report templates for Qalm.
 You receive an example meeting report. Describe its structure as a reusable template: the sections in order,
 what kind each section is, and a one-sentence instruction for writing it. Also describe its writing style in one or two sentences.
 Section kinds: ${KINDS.join(', ')}.

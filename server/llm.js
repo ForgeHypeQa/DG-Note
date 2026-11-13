@@ -2,7 +2,7 @@
 //   ANTHROPIC_API_KEY  required
 //   REPORT_MODEL       writes the report      (default claude-sonnet-5-5)
 //   TRANSLATE_MODEL    translation             (default claude-haiku-5-5)
-// Users only ever see "ForgeHype Meet".
+// Users only ever see "Qalm".
 const KEY = () => process.env.ANTHROPIC_API_KEY;
 export const configured = () => !!KEY();
 

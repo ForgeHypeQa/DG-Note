@@ -172,7 +172,7 @@ function procView(title,sub,steps,pi,openAct,backAct,backLabel){
 function runProc(scope,n,done){scope.pi=0;const step=()=>{scope.pi++;if(scope.pi>=n)done();render();if(scope.pi<n)T(step,900);};T(step,900);}
 
 /* ================= SOLO · real recording ================= */
-// Flow: record on this phone (saved every 5 s) → end → upload once → ForgeHype Meet transcription
+// Flow: record on this phone (saved every 5 s) → end → upload once → Qalm transcription
 // (speakers + Arabic/English + translation) → names from the introductions → review → report.
 const API = location.protocol.startsWith('http') ? '' : 'http://localhost:3000';
 let ROSTER = Object.keys(DIR).map(k=>({id:k,name:DIR[k].n,dept:DIR[k].d,email:DIR[k].e}));
@@ -223,7 +223,7 @@ const onRecTab=()=>ST.tab===(isListen()?'listen':'solo');
 let FILE_MODE='solo';
 const savedTxt=()=>isListen()?`${(REC.bytes/1048576).toFixed(1)} MB`:`Saved on this phone · ${(REC.bytes/1048576).toFixed(1)} MB`;
 async function recStart(continueMid,src){
-  if(!window.isSecureContext) throw new Error('The microphone only works over https (or on localhost). Open DG-Note from its https address.');
+  if(!window.isSecureContext) throw new Error('The microphone only works over https (or on localhost). Open Qalm from its https address.');
   if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder) throw new Error('This browser cannot record audio. Use Chrome on Android or Safari on iPhone.');
   const stream=src?.stream||await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:true,channelCount:1}});
   const mime=pickMime(), mr=new MediaRecorder(stream,mime?{mimeType:mime,audioBitsPerSecond:64000}:{});
@@ -264,7 +264,7 @@ function recLost(){
   const s=ST.solo;if(!(s.phase==='intro'||s.phase==='meet'))return;
   if(isListen()){ACT['solo-end-ok']();return;}
   render();
-  sheet(`<div class="bigic">${I('mic')}</div><h3>Recording stopped while DG-Note was in the background</h3><p>Everything up to ${mmss(s.t)} is saved on this phone. Continue to record the rest of the meeting into the same file.</p><div class="stk"><button class="btnk" data-act="solo-continue-now">Continue recording</button><button class="btng" data-act="solo-end-ok">End meeting and send</button></div>`);
+  sheet(`<div class="bigic">${I('mic')}</div><h3>Recording stopped while Qalm was in the background</h3><p>Everything up to ${mmss(s.t)} is saved on this phone. Continue to record the rest of the meeting into the same file.</p><div class="stk"><button class="btnk" data-act="solo-continue-now">Continue recording</button><button class="btng" data-act="solo-end-ok">End meeting and send</button></div>`);
 }
 document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState==='visible'&&ME_USER)fetch(API+'/api/me').catch(()=>{});
@@ -272,7 +272,7 @@ document.addEventListener('visibilitychange',()=>{
   if(REC.lost||(REC.mr&&REC.mr.state==='inactive'&&!REC.stopping&&(ST.solo.phase==='intro'||ST.solo.phase==='meet'))){REC.lost=true;recLost();return;}
   if(!recording())return;
   wake(true);
-  if(REC.hiddenAt&&Date.now()-REC.hiddenAt>3000&&!isListen())toast('Welcome back. Still recording. Keep DG-Note on screen: some phones stop recording in the background.');
+  if(REC.hiddenAt&&Date.now()-REC.hiddenAt>3000&&!isListen())toast('Welcome back. Still recording. Keep Qalm on screen: some phones stop recording in the background.');
   REC.hiddenAt=0;
 });
 
@@ -293,7 +293,7 @@ async function processMeeting(mid,fileBlob,liveWords){
     s.parts=parts; s.blob=parts[0];
     const blob=parts.length>1?new Blob(parts,{type:parts[0].type}):parts[0];
     if(!HEALTH||HEALTH.offline)await loadServer();
-    if(HEALTH?.offline)throw new Error('Cannot reach the DG-Note server. Your recording is safe on this phone. Try again when you are online.');
+    if(HEALTH?.offline)throw new Error('Cannot reach the Qalm server. Your recording is safe on this phone. Try again when you are online.');
     if(!HEALTH.engine)throw new Error('Transcription is not switched on for this server yet. Ask the admin. Your recording is safe on this phone.');
     // Listen: the words streamed during the recording are the transcript. No second pass is needed.
     let got=false;
@@ -330,7 +330,7 @@ async function checkPending(){
     if((ST.tab==='solo'||ST.tab==='listen')&&ST.solo.phase==='idle')render();}catch(e){}
 }
 function audioName(){const s=ST.solo,ext=/mp4|m4a|aac/.test(s.blob?.type||'')?'m4a':/ogg/.test(s.blob?.type||'')?'ogg':/mpeg|mp3/.test(s.blob?.type||'')?'mp3':/wav/.test(s.blob?.type||'')?'wav':'webm';
-  return `DG-Note_${(s.title||'Solo').replace(/[^A-Za-z0-9]+/g,'_').replace(/^_|_$/g,'')}_${new Date().toISOString().slice(0,10)}.${ext}`;}
+  return `Qalm_${(s.title||'Solo').replace(/[^A-Za-z0-9]+/g,'_').replace(/^_|_$/g,'')}_${new Date().toISOString().slice(0,10)}.${ext}`;}
 function saveAudio(blob,name){if(!blob)return toast('No audio on this phone');const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);}
 
 /* --- views --- */
@@ -370,7 +370,7 @@ function cardHTML(i){
 const rosterDrawer=()=>drawer('solo-names','Names for testing',ROSTER.length,`<p class="note" style="margin-bottom:6px">Sample staff list. Say one of these names in the introduction and it is matched, even if slightly misheard. Other names are kept as spoken.</p>`+ROSTER.map(p=>`<div class="lrow"><div class="grow"><b>${esc(p.name)}</b><small>${esc(p.dept)}${p.ar?' · <span lang="ar">'+esc(p.ar)+'</span>':''}</small></div></div>`).join(''));
 function serverNote(){
   if(!HEALTH)return '';
-  if(HEALTH.offline)return `<div class="warnbox">Cannot reach the DG-Note server. You can still record. The recording stays on this phone until it can be sent.</div>`;
+  if(HEALTH.offline)return `<div class="warnbox">Cannot reach the Qalm server. You can still record. The recording stays on this phone until it can be sent.</div>`;
   if(!HEALTH.engine)return `<div class="warnbox">Transcription is not switched on for this server yet. You can still record; ask the admin to switch it on.</div>`;
   return '';
 }
@@ -498,7 +498,7 @@ async function listenPip(auto){
   if(!('documentPictureInPicture' in window)){if(!auto)toast('Floating controls need Chrome or Edge on a computer');return;}
   if(LIS.pip||!isListen()||ST.solo.phase!=='meet')return;
   let w;try{w=await documentPictureInPicture.requestWindow({width:340,height:84});}catch(e){if(!auto)toast('The floating controls could not open');return;}
-  const d=w.document,s=ST.solo,st=d.createElement('style');d.title='ForgeHype Meet';
+  const d=w.document,s=ST.solo,st=d.createElement('style');d.title='Qalm';
   st.textContent=`html,body{margin:0;height:100%;background:#161414;color:#fff;font:600 14px/1 system-ui,Segoe UI,Roboto,sans-serif}
    .p{height:100%;display:flex;align-items:center;gap:10px;padding:0 12px;box-sizing:border-box}
    .dot{width:10px;height:10px;border-radius:50%;background:#FF453A;flex:none;animation:b 1.2s infinite}.dot.pz{background:#FFC46A;animation:none}@keyframes b{50%{opacity:.25}}
@@ -717,7 +717,7 @@ function syncTplEditor(){
 }
 function openTplExample(){
   ST.tplPdf=null;
-  sheet(`<h3>Make a template from an example</h3><p>Paste a report you like, or choose it as a PDF. ForgeHype Meet reads its sections and style and turns them into a template you can edit.</p>
+  sheet(`<h3>Make a template from an example</h3><p>Paste a report you like, or choose it as a PDF. Qalm reads its sections and style and turns them into a template you can edit.</p>
     <div class="stk"><label class="fld"><span>Example report</span><textarea id="exText" rows="7" placeholder="Paste the example report here"></textarea></label>
       <button class="btng" data-act="tpl-file">Choose a PDF or text file</button><p id="exFile" style="font-size:13px;margin:0"></p>
       <button class="btnk" id="exGo" data-act="tpl-make">Make the template</button><button class="btng" data-act="tpl-back">Back</button></div>`);
@@ -839,7 +839,7 @@ function viewGroup(){
         <div class="row"><span class="recp ${g.paused?'paused':''}"><i></i><b>${g.paused?'PAUSED':'LIVE'}</b></span><span class="tm" id="gLobbyTime">${mmss(g.elapsed)}</span><span class="grow"></span><span class="inv">${g.joined?'You are in':'You’re invited'}</span></div>
         <h3>Weekly Elderly Care Case Review</h3><p>Conference Room B · You are the host</p>
         <div class="row" style="margin-top:16px"><div class="avs">${gAll().slice(0,6).map(id=>`<span class="av" style="--c:${DIR[id].c}">${ini(DIR[id].n)}</span>`).join('')}</div><span style="font-size:13px;color:#BDB9B8">${gAll().length} joined</span><span class="grow"></span><span class="joinb">${g.joined?'Return':'Join'}</span></div>
-      </button>`:`<div class="empty">No meetings in progress.${g.rid?'<br>The last meeting’s report is under Reports.':''}</div>`}
+      </button>`:`<div class="empty">No meetings in progress.${g.rid?'<br>The last meeting’s report is under Recap.':''}</div>`}
      ${drawer('g-up','Upcoming',g.upcoming.length,g.upcoming.map(u=>`<div class="lrow"><div class="grow"><b>${esc(u.t)}</b><small>${esc(u.w)} · by ${esc(u.by)}</small></div><span class="tagp ${u.by==='you'?'warn':'mute'}">${u.by==='you'?'Host':'Invited'}</span></div>`).join(''),false,esc(g.upcoming[0].t))}
      <button class="btn2" data-act="g-new">${I('plus','s')}New meeting</button>
      ${drawer('g-about','How Group works','',`<ol class="steps"><li>Create a meeting and invite people. They get a link by email and WhatsApp.</li><li>Invited people see the meeting here and tap to join. Others wait for the host.</li><li>Share your screen, chat, ask questions and raise a hand, like any online meeting.</li><li>Only the host can pause or end the recording.</li></ol>`)}`);
@@ -967,10 +967,10 @@ function viewReports(){
   const r=curRep(); if(r) return repDetail(r);
   const drafts=ST.reports.filter(x=>x.status==='draft').length;
   return capsheet(
-    `<div class="eyebrow">Written in English · translate any time</div><h1 class="lt">Reports</h1>
+    `<div class="eyebrow">Written in English · translate any time</div><h1 class="lt">Recap</h1>
      <label class="search">${I('search')}<input id="repQ" placeholder="Search title, person or decision" value="${esc(ST.rep.q)}" autocomplete="off" aria-label="Search reports"></label>
      <button class="tplbtn" data-act="tpl-manage">${I('copy','s')}<span>Report templates</span><b>${esc(tplById(getDefaultTplId()).name)}</b>${I('fwd','s')}</button>`,
-    `<div class="chips">${[['all','All'],['review','Needs review'+(drafts?' · '+drafts:'')],['solo','Solo'],['group','Group'],['listen','Listen']].map(([k,l])=>`<button class="chipf ${ST.rep.filter===k?'on':''}" data-act="rep-filter" data-f="${k}">${l}</button>`).join('')}</div>
+    `<div class="chips">${[['all','All'],['review','Needs review'+(drafts?' · '+drafts:'')],['solo','Solo'],['listen','Listen'],['group','Group']].map(([k,l])=>`<button class="chipf ${ST.rep.filter===k?'on':''}" data-act="rep-filter" data-f="${k}">${l}</button>`).join('')}</div>
      <div id="repList" style="display:flex;flex-direction:column;gap:10px">${repListHTML()}</div>`);
 }
 function repDetail(r){
@@ -986,10 +986,10 @@ function repDetail(r){
   // Section headings from the report's template (translated in Arabic), else the standard ones.
   const lay=r.real&&mins==='done'&&Array.isArray(r.layout)?r.layout:null;
   const T=(field,fallback)=>{const e=lay&&lay.find(x=>x.field===field);return e?((tr&&tr.titles&&tr.titles[e.key])||e.title):fallback;};
-  if(r.real&&isL2&&!tr)return capsheet(`<div class="bar"><button class="back" data-act="rep-back">${I('back')}Reports</button><span class="grow"></span><span class="lseg" role="group" aria-label="Language">${`<button class="${lang==='en'?'on':''}" data-act="rep-l" data-l="en" aria-label="English">EN</button><button class="${isL2?'on':''}" data-act="rep-l2" aria-label="Second language: ${l2[2]}. Tap to choose">${l2[1]}<i class="car">▾</i></button><button class="${lang==='orig'?'on':''}" data-act="rep-l" data-l="orig" aria-label="As spoken">Orig</button>`}</span></div>
+  if(r.real&&isL2&&!tr)return capsheet(`<div class="bar"><button class="back" data-act="rep-back">${I('back')}Recap</button><span class="grow"></span><span class="lseg" role="group" aria-label="Language">${`<button class="${lang==='en'?'on':''}" data-act="rep-l" data-l="en" aria-label="English">EN</button><button class="${isL2?'on':''}" data-act="rep-l2" aria-label="Second language: ${l2[2]}. Tap to choose">${l2[1]}<i class="car">▾</i></button><button class="${lang==='orig'?'on':''}" data-act="rep-l" data-l="orig" aria-label="As spoken">Orig</button>`}</span></div>
       <h1 class="mt">${esc(r.title)}</h1><div class="writing"><span class="gdots"><i></i><i></i><i></i></span>Translating the report into ${l2[2]}…</div>`,
     `<p class="fine">The report comes first, in a few seconds. The transcript follows. Tap EN to go back.</p>`);
-  const cap=`<div class="bar"><button class="back" data-act="rep-back">${I('back')}Reports</button><span class="grow"></span>
+  const cap=`<div class="bar"><button class="back" data-act="rep-back">${I('back')}Recap</button><span class="grow"></span>
       ${r.real&&mins==='done'?readBtn('all','top'):''}${r.real?`<span class="lseg" role="group" aria-label="Language">${`<button class="${lang==='en'?'on':''}" data-act="rep-l" data-l="en" aria-label="English">EN</button><button class="${isL2?'on':''}" data-act="rep-l2" aria-label="Second language: ${l2[2]}. Tap to choose">${l2[1]}<i class="car">▾</i></button><button class="${lang==='orig'?'on':''}" data-act="rep-l" data-l="orig" aria-label="As spoken">Orig</button>`}</span>`
         :Object.keys(r.tr).length?`<button class="pillb" data-act="rep-lang">${I('globe','s')}${LANG[lang].name}</button>`:''}
       ${r.status==='draft'&&lang==='en'?`<button class="pillb ${ed?'on':''}" data-act="rep-edit">${ed?'Done':'Edit'}</button>`:''}</div>
@@ -1014,7 +1014,7 @@ function repDetail(r){
       return `<div class="tt" ${E('t'+i,'tx')}>${rt(r,'t'+i,l.s)}</div>${l.o&&!r.real?`<div class="to" dir="auto"${isAr?' lang="ar"':''}>${esc(l.o)}</div>`:''}`;})()}</div>`;}).join('');
   let seed=7;const rnd=()=>{seed=(seed*16807)%2147483647;return seed/2147483647;};
   const bars=r.tx.map(l=>Array.from({length:Math.max(4,Math.round(l.s.length/12))},()=>`<i style="--c:${who(l.p).c};height:${20+Math.round(rnd()*80)}%"></i>`).join('')+'<i style="--c:#D5D2D0;height:8%"></i>').join('');
-  const rec=r.real?((r.audios||[]).length?(r.audios.length>1?`<p class="note" style="margin-bottom:8px">Recorded in ${r.audios.length} parts because the phone paused the recording. The transcript covers all parts.</p>`:'')+spTimeline(r)+r.audios.map((u,k)=>`${r.audios.length>1?`<b style="display:block;font-size:13px;margin:8px 0 4px">Part ${k+1}</b>`:''}<audio class="aud" controls preload="metadata" src="${u}"></audio>`).join('')+`<button class="btn2" style="margin-top:10px" data-act="rep-dl">Save the audio file${r.audios.length>1?'s':''}</button><button class="btn2" style="margin-top:8px" data-act="rep-txt">Save the transcript (.txt)</button><button class="btn2 danger" style="margin-top:8px" data-act="rep-del">Delete this meeting from the phone</button><p class="fine" style="text-align:start;margin-top:8px">Saved on this phone. The ForgeHype Meet server deletes its copy after transcription.</p>`:'<p class="note">The audio stays on the phone that recorded it.</p>'):`<div style="display:flex;gap:12px;align-items:center"><button class="playb" data-act="rep-play" aria-label="Play recording">${I(ST.rep.play?'pause':'play')}</button><div class="grow"><b style="font-size:15px">${esc(r.title.replace(/[^A-Za-z0-9]+/g,'_'))}.mp3</b><div style="font-size:13px;color:var(--fg2)">${r.dur} · ${r.people.length} speakers · kept for 30 days</div></div></div><div class="wavebars" id="wave">${bars}</div><p class="fine" style="text-align:start;margin-top:8px">Colours show who is speaking. Playback is simulated in this prototype.</p>`;
+  const rec=r.real?((r.audios||[]).length?(r.audios.length>1?`<p class="note" style="margin-bottom:8px">Recorded in ${r.audios.length} parts because the phone paused the recording. The transcript covers all parts.</p>`:'')+spTimeline(r)+r.audios.map((u,k)=>`${r.audios.length>1?`<b style="display:block;font-size:13px;margin:8px 0 4px">Part ${k+1}</b>`:''}<audio class="aud" controls preload="metadata" src="${u}"></audio>`).join('')+`<button class="btn2" style="margin-top:10px" data-act="rep-dl">Save the audio file${r.audios.length>1?'s':''}</button><button class="btn2" style="margin-top:8px" data-act="rep-txt">Save the transcript (.txt)</button><button class="btn2 danger" style="margin-top:8px" data-act="rep-del">Delete this meeting from the phone</button><p class="fine" style="text-align:start;margin-top:8px">Saved on this phone. The Qalm server deletes its copy after transcription.</p>`:'<p class="note">The audio stays on the phone that recorded it.</p>'):`<div style="display:flex;gap:12px;align-items:center"><button class="playb" data-act="rep-play" aria-label="Play recording">${I(ST.rep.play?'pause':'play')}</button><div class="grow"><b style="font-size:15px">${esc(r.title.replace(/[^A-Za-z0-9]+/g,'_'))}.mp3</b><div style="font-size:13px;color:var(--fg2)">${r.dur} · ${r.people.length} speakers · kept for 30 days</div></div></div><div class="wavebars" id="wave">${bars}</div><p class="fine" style="text-align:start;margin-top:8px">Colours show who is speaking. Playback is simulated in this prototype.</p>`;
   const hist=r.hist.slice().reverse().map(h=>`<div class="hrow2"><small>${esc(h.label)} · ${h.when}</small><s>${esc(h.from)}</s><div>${esc(h.to)}</div></div>`).join('');
   const dock=ed&&r.real?`<button class="dbt k" data-act="rep-edit">Done</button>`:ed?`<button class="dbt" data-act="rep-dictate" ${ST.rep.dictating?'disabled':''}>${I('mic','s')}${ST.rep.dictating?'Listening…':'Dictate'}</button><button class="dbt k" data-act="rep-edit">Done</button>`
     :r.status==='sent'?`<span class="sentl">${I('check','s')}${r.real?'Approved':'Sent to '+r.people.filter(p=>p.e).length+' people'}</span><button class="dbt ic" data-act="rep-copy" aria-label="Copy summary">${I('copy','s')}</button>`
@@ -1124,10 +1124,10 @@ const ACT={
  'lv-tr'(){const s=ST.solo;s.ltr=!s.ltr;render();},
  'lv-lang'(){openLangs('lis',ST.solo.ltarget||'en');},
  async 'lv-copy'(){const t=liveAllText();if(!t)return toast('Nothing to copy yet');try{await navigator.clipboard.writeText(t);toast('Text copied');}catch(e){toast('Could not copy on this browser');}},
- 'lv-txt'(){const t=liveAllText();if(!t)return toast('Nothing to save yet');saveAudio(new Blob([t+'\n'],{type:'text/plain;charset=utf-8'}),'ForgeHype_Listen_'+new Date().toISOString().slice(0,10)+'.txt');},
+ 'lv-txt'(){const t=liveAllText();if(!t)return toast('Nothing to save yet');saveAudio(new Blob([t+'\n'],{type:'text/plain;charset=utf-8'}),'Qalm_Listen_'+new Date().toISOString().slice(0,10)+'.txt');},
  'lv-doc'(){const ps=liveParas();if(!ps.length)return toast('Nothing to save yet');
    const html=`<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>Listen transcript</title></head><body style="font-family:Calibri,Arial;font-size:12pt"><h2>${esc(ST.solo.title||'Listen transcript')}</h2><p style="color:#666">${new Date().toLocaleString()}</p>${ps.map(t=>`<p dir="auto">${esc(t)}</p>`).join('')}</body></html>`;
-   saveAudio(new Blob(['﻿'+html],{type:'application/msword'}),'ForgeHype_Listen_'+new Date().toISOString().slice(0,10)+'.doc');},
+   saveAudio(new Blob(['﻿'+html],{type:'application/msword'}),'Qalm_Listen_'+new Date().toISOString().slice(0,10)+'.doc');},
  'lv-link'(){sheet(`<h3>Watch a YouTube video here</h3><p>In YouTube tap Share, copy the link and paste it. The video plays at the top of this page while the text is written below it.</p><div class="stk"><label class="fld"><span>Video link</span><input id="lisUrl" value="${esc(ST.solo.lurl||'')}" placeholder="https://youtu.be/…" inputmode="url" autocomplete="off" autocapitalize="none"></label><button class="btnk" data-act="lv-link-ok">Use this video</button>${ytId(ST.solo.lurl)?'<button class="btng" data-act="lv-link-no">Remove the video</button>':''}<button class="btng" data-act="close">Cancel</button></div>`);},
  'lv-link-ok'(){const s=ST.solo;if(!ytId(s.lurl))return toast('That is not a YouTube video link');closeSheet();render();},
  'lv-link-no'(){ST.solo.lurl='';closeSheet();render();},
@@ -1218,7 +1218,7 @@ const ACT={
      openTplEditor({name:m.name,sections:m.sections,style:m.style,example:pdf?'':text},true);toast('Template ready. Check it, then save.');}
    catch(e){b.disabled=false;b.textContent='Make the template';sheet(`<h3>The template could not be made</h3><p>${esc(e.message)}</p><div class="stk"><button class="btnk" data-act="tpl-example">Try again</button><button class="btng" data-act="tpl-back">Back</button></div>`);}},
  'rep-minutes'(){const r=curRep();if(!r)return;saveAll();makeMinutes(r);},
- 'solo-new'(){const s=ST.solo;if(s.phase==='review')toast('The transcript is in Reports. Check the names there any time.');Object.assign(s,{phase:'idle',t:0,paused:false,introEndMs:0,speakers:[],result:null,title:'',rid:null,err:'',mid:null});render();checkPending();},
+ 'solo-new'(){const s=ST.solo;if(s.phase==='review')toast('The transcript is in Recap. Check the names there any time.');Object.assign(s,{phase:'idle',t:0,paused:false,introEndMs:0,speakers:[],result:null,title:'',rid:null,err:'',mid:null});render();checkPending();},
  /* ---- group ---- */
  'g-join'(){const g=ST.group;if(!g.live)return;if(!g.joined){g.joined=true;toast('You’re on the invite list. Recording started on your phone.');startGroupSim();}g.phase='meeting';render();window.scrollTo(0,0);},
  'g-lobby'(){ST.group.phase='lobby';render();},
@@ -1242,7 +1242,7 @@ const ACT={
  'rep-setlang'(el){ST.rep.lang=el.dataset.l;ST.rep.edit=false;ST.rep.shim=true;closeSheet();render();if(ST.rep.lang!=='en')toast('Translated to '+LANG[ST.rep.lang].name);},
  'rep-en'(){ST.rep.lang='en';ST.rep.shim=true;render();},
  'u-open'(el){if(ST.rep.edit)return;
-   if(!el.dataset.b){sheet(`<h3>Unclear in the audio</h3><p>ForgeHype Meet was not sure about this word. Keep it, or type the right one.</p><div class="stk"><button class="btnk" data-act="u-pick" data-id="${el.dataset.id}" data-v="${esc(el.dataset.a)}" data-o="">Keep “${esc(el.dataset.a)}”</button><label class="fld"><span>Correct word</span><input id="uFix" value="${esc(el.dataset.a)}" autocomplete="off"></label><button class="btng" data-act="u-fix" data-id="${el.dataset.id}" data-o="${esc(el.dataset.a)}">Use this word</button></div>`);return;}
+   if(!el.dataset.b){sheet(`<h3>Unclear in the audio</h3><p>Qalm was not sure about this word. Keep it, or type the right one.</p><div class="stk"><button class="btnk" data-act="u-pick" data-id="${el.dataset.id}" data-v="${esc(el.dataset.a)}" data-o="">Keep “${esc(el.dataset.a)}”</button><label class="fld"><span>Correct word</span><input id="uFix" value="${esc(el.dataset.a)}" autocomplete="off"></label><button class="btng" data-act="u-fix" data-id="${el.dataset.id}" data-o="${esc(el.dataset.a)}">Use this word</button></div>`);return;}
    sheet(`<h3>Unclear in the audio</h3><p>The recording was not clear at this word. Which one is right?</p><div class="stk"><button class="btnk" data-act="u-pick" data-id="${el.dataset.id}" data-v="${esc(el.dataset.a)}" data-o="${esc(el.dataset.b)}">${esc(el.dataset.a)}</button><button class="btng" data-act="u-pick" data-id="${el.dataset.id}" data-v="${esc(el.dataset.b)}" data-o="${esc(el.dataset.a)}">${esc(el.dataset.b)}</button></div><p style="font-size:13px">Your choice is used everywhere in this report and saved in the change history.</p>`);},
  'u-fix'(el){const v=$('#uFix').value.trim();if(!v)return;const r=curRep();r.res[el.dataset.id]=v;r.v=(r.v||0)+1;r.hist.push({label:'Unclear word corrected',from:el.dataset.o,to:v,when:hm(new Date())});closeSheet();render();},
  'rep-dl'(){const r=curRep();(r?._blobs||[]).forEach((b,k,a)=>setTimeout(()=>saveAudio(b,a.length>1?r.audioName.replace(/(\.\w+)$/,`_part${k+1}$1`):r.audioName),k*600));},
@@ -1314,12 +1314,12 @@ const isStandalone=()=>matchMedia('(display-mode: standalone)').matches||navigat
 const isIOS=()=>/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 if('serviceWorker' in navigator&&location.protocol.startsWith('http'))window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();INSTALL_EVT=e;$$('.instbtn').forEach(b=>b.hidden=false);});
-window.addEventListener('appinstalled',()=>{INSTALL_EVT=null;$$('.instbtn').forEach(b=>b.hidden=true);toast('DG-Note is on your home screen');});
-const installBtn=(cls='btn2')=>isStandalone()?'':`<button type="button" class="${cls} instbtn" data-act="install">${I('device','s')}Add DG-Note to your home screen</button>`;
+window.addEventListener('appinstalled',()=>{INSTALL_EVT=null;$$('.instbtn').forEach(b=>b.hidden=true);toast('Qalm is on your home screen');});
+const installBtn=(cls='btn2')=>isStandalone()?'':`<button type="button" class="${cls} instbtn" data-act="install">${I('device','s')}Add Qalm to your home screen</button>`;
 async function install(){
   if(INSTALL_EVT){INSTALL_EVT.prompt();const r=await INSTALL_EVT.userChoice.catch(()=>({}));INSTALL_EVT=null;if(r.outcome!=='accepted')toast('You can add it any time from here');return;}
   const ios=isIOS();
-  sheet(`<div class="bigic" style="background:none;padding:0"><img src="/icons/icon-192.png" alt="" width="60" height="60" style="border-radius:16px"></div><h3>Add DG-Note to your home screen</h3><p>It opens full screen with its own icon, like any app.</p>
+  sheet(`<div class="bigic" style="background:none;padding:0"><img src="/icons/icon-192.png" alt="" width="60" height="60" style="border-radius:16px"></div><h3>Add Qalm to your home screen</h3><p>It opens full screen with its own icon, like any app.</p>
     <ol class="steps" style="margin-top:16px;color:var(--ink)">${ios
       ?`<li>Open this page in <b>Safari</b>.</li><li>Tap the <b>Share</b> button (square with an arrow) at the bottom.</li><li>Scroll down and tap <b>Add to Home Screen</b>, then <b>Add</b>.</li>`
       :`<li>Open this page in <b>Chrome</b>.</li><li>Tap the <b>⋮</b> menu at the top right.</li><li>Tap <b>Add to Home screen</b> or <b>Install app</b>, then <b>Install</b>.</li>`}</ol>
@@ -1337,8 +1337,8 @@ async function boot(){
   showLogin();
 }
 function loginHTML(msg){
-  return `<div class="lhero"><span class="fh fh-xl" aria-label="ForgeHype"><span class="f">Forge</span><span class="h">Hype</span></span>
-     <div class="eyebrow" style="margin-top:44px">DG-Note</div><h1 class="lt">Sign in</h1><p class="sub">Meeting notes that know who spoke.</p></div>
+  return `<div class="lhero"><img class="qlogo xl" src="/icons/qalm-logo.png" alt="Qalm by ForgeHype" width="230" height="90">
+     <div class="eyebrow" style="margin-top:44px">Qalm</div><h1 class="lt">Sign in</h1><p class="sub">Meeting notes that know who spoke.</p></div>
    <form class="lform" data-form="login" autocomplete="on">
      ${msg?`<div class="warnbox">${esc(msg)}</div>`:''}
      <label class="fld"><span>Email or guest name</span><input id="lgLogin" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="you@forgehype.qa or Guest 1" required></label>
